@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RANSAC Circle Finder</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #111;
+      color: #ddd;
+      min-height: 100vh;
+      padding: 24px;
+    }
+
+    h1 { font-size: 1.4rem; font-weight: 600; color: #fff; margin-bottom: 4px; }
+    .subtitle { font-size: 0.82rem; color: #555; margin-bottom: 24px; }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      gap: 20px;
+      max-width: 1300px;
+      margin: 0 auto;
+      align-items: start;
+    }
+
+    /* Sidebar */
+    .sidebar { display: flex; flex-direction: column; gap: 16px; }
+
+    .panel {
+      background: #1c1c1c;
+      border: 1px solid #2a2a2a;
+      border-radius: 10px;
+      padding: 16px;
+    }
+
+    .panel h2 {
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #666;
+      margin-bottom: 14px;
+    }
+
+    .field { margin-bottom: 12px; }
+    .field:last-child { margin-bottom: 0; }
+
+    .field label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.83rem;
+      color: #aaa;
+      margin-bottom: 6px;
+    }
+
+    .field label span { color: #6c8ef5; font-weight: 600; }
+
+    input[type=range] {
+      width: 100%;
+      accent-color: #6c8ef5;
+      cursor: pointer;
+    }
+
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 0.83rem;
+      color: #aaa;
+      margin-bottom: 10px;
+    }
+    .toggle-row:last-child { margin-bottom: 0; }
+
+    .toggle {
+      position: relative;
+      width: 36px;
+      height: 20px;
+    }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle-slider {
+      position: absolute;
+      inset: 0;
+      background: #333;
+      border-radius: 20px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .toggle-slider:before {
+      content: "";
+      position: absolute;
+      width: 14px;
+      height: 14px;
+      left: 3px;
+      top: 3px;
+      background: #888;
+      border-radius: 50%;
+      transition: transform 0.2s, background 0.2s;
+    }
+    .toggle input:checked + .toggle-slider { background: #6c8ef5; }
+    .toggle input:checked + .toggle-slider:before { transform: translateX(16px); background: #fff; }
+
+    #drop-zone {
+      border: 2px dashed #333;
+      border-radius: 8px;
+      padding: 28px 16px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    #drop-zone:hover, #drop-zone.drag-over { border-color: #6c8ef5; background: rgba(108,142,245,0.05); }
+    #drop-zone p { font-size: 0.82rem; color: #555; margin-bottom: 8px; }
+
+    button {
+      background: #6c8ef5;
+      color: #fff;
+      border: none;
+      padding: 9px 16px;
+      border-radius: 7px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 500;
+      transition: background 0.2s;
+      width: 100%;
+    }
+    button:hover { background: #5a7ae0; }
+    button:disabled { background: #2a2a2a; color: #555; cursor: not-allowed; }
+
+    #btn-run { margin-top: 4px; }
+
+    /* Stats */
+    .stat-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .stat {
+      background: #141414;
+      border-radius: 7px;
+      padding: 10px;
+      text-align: center;
+    }
+    .stat .val { font-size: 1.1rem; font-weight: 600; color: #6c8ef5; }
+    .stat .lbl { font-size: 0.72rem; color: #555; margin-top: 2px; }
+
+    /* Main canvas area */
+    .canvas-area { display: flex; flex-direction: column; gap: 12px; }
+
+    .view-tabs {
+      display: flex;
+      gap: 6px;
+    }
+    .tab {
+      background: #1c1c1c;
+      border: 1px solid #2a2a2a;
+      color: #777;
+      padding: 7px 14px;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .tab:hover { color: #bbb; }
+    .tab.active { background: #6c8ef5; color: #fff; border-color: #6c8ef5; }
+
+    .canvas-wrap {
+      background: #0a0a0a;
+      border: 1px solid #1e1e1e;
+      border-radius: 10px;
+      overflow: hidden;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 300px;
+      position: relative;
+    }
+
+    canvas { display: block; max-width: 100%; max-height: 70vh; }
+
+    #placeholder {
+      text-align: center;
+      color: #333;
+      font-size: 0.9rem;
+    }
+
+    .status-bar {
+      font-size: 0.78rem;
+      color: #555;
+      padding: 4px 0;
+    }
+
+    #spinner {
+      display: none;
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      justify-content: center;
+      align-items: center;
+      font-size: 0.9rem;
+      color: #aaa;
+      border-radius: 10px;
+    }
+    #spinner.show { display: flex; }
+
+    @media (max-width: 700px) {
+      .layout { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <h1>RANSAC Circle Finder</h1>
+  <p class="subtitle">Detects the dominant circle in an image using edge detection + RANSAC</p>
+
+  <div class="layout">
+    <!-- Sidebar -->
+    <div class="sidebar">
+
+      <div class="panel">
+        <h2>Image</h2>
+        <div id="drop-zone">
+          <p>Drop image here or</p>
+          <button onclick="document.getElementById('file-input').click()" style="width:auto;padding:7px 14px">Browse</button>
+          <input type="file" id="file-input" accept="image/*" style="display:none">
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Edge Detection</h2>
+        <div class="field">
+          <label>Gaussian blur <span id="blur-val">1.5</span></label>
+          <input type="range" id="blur" min="0.5" max="4" step="0.5" value="1.5">
+        </div>
+        <div class="field">
+          <label>Low threshold <span id="low-val">20</span></label>
+          <input type="range" id="low-thresh" min="5" max="100" step="5" value="20">
+        </div>
+        <div class="field">
+          <label>High threshold <span id="high-val">50</span></label>
+          <input type="range" id="high-thresh" min="10" max="200" step="10" value="50">
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>RANSAC</h2>
+        <div class="field">
+          <label>Iterations <span id="iter-val">1000</span></label>
+          <input type="range" id="iterations" min="100" max="5000" step="100" value="1000">
+        </div>
+        <div class="field">
+          <label>Inlier tolerance (px) <span id="tol-val">3</span></label>
+          <input type="range" id="tolerance" min="1" max="20" step="1" value="3">
+        </div>
+        <div class="field">
+          <label>Min radius (px) <span id="minr-val">10</span></label>
+          <input type="range" id="min-radius" min="1" max="200" step="1" value="10">
+        </div>
+        <div class="field">
+          <label>Max radius (px) <span id="maxr-val">500</span></label>
+          <input type="range" id="max-radius" min="20" max="2000" step="10" value="500">
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Display</h2>
+        <div class="toggle-row">
+          <span>Show edge points</span>
+          <label class="toggle"><input type="checkbox" id="show-edges" checked><span class="toggle-slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span>Show inliers</span>
+          <label class="toggle"><input type="checkbox" id="show-inliers" checked><span class="toggle-slider"></span></label>
+        </div>
+        <div class="toggle-row">
+          <span>Show circle</span>
+          <label class="toggle"><input type="checkbox" id="show-circle" checked><span class="toggle-slider"></span></label>
+        </div>
+      </div>
+
+      <button id="btn-run" disabled>Run RANSAC</button>
+
+      <div class="panel" id="stats-panel" style="display:none">
+        <h2>Result</h2>
+        <div class="stat-grid">
+          <div class="stat"><div class="val" id="stat-cx">—</div><div class="lbl">Center X</div></div>
+          <div class="stat"><div class="val" id="stat-cy">—</div><div class="lbl">Center Y</div></div>
+          <div class="stat"><div class="val" id="stat-r">—</div><div class="lbl">Radius (px)</div></div>
+          <div class="stat"><div class="val" id="stat-inliers">—</div><div class="lbl">Inliers</div></div>
+          <div class="stat"><div class="val" id="stat-edges">—</div><div class="lbl">Edge pts</div></div>
+          <div class="stat"><div class="val" id="stat-score">—</div><div class="lbl">Score %</div></div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Canvas area -->
+    <div class="canvas-area">
+      <div class="view-tabs">
+        <button class="tab active" data-view="result">Result</button>
+        <button class="tab" data-view="edges">Edge Map</button>
+        <button class="tab" data-view="original">Original</button>
+      </div>
+      <div class="canvas-wrap">
+        <div id="placeholder">Load an image to begin</div>
+        <canvas id="result-canvas" style="display:none"></canvas>
+        <canvas id="edge-canvas" style="display:none"></canvas>
+        <canvas id="orig-canvas" style="display:none"></canvas>
+        <div id="spinner">Running RANSAC...</div>
+      </div>
+      <div class="status-bar" id="status">No image loaded.</div>
+    </div>
+  </div>
+
+<script>
+// ─── Globals ────────────────────────────────────────────────────────────────
+let srcImage = null;
+let edgePoints = [];        // [{x,y}]
+let bestCircle = null;      // {cx, cy, r, inliers:[{x,y}]}
+let currentView = 'result';
+
+const resultCanvas = document.getElementById('result-canvas');
+const edgeCanvas   = document.getElementById('edge-canvas');
+const origCanvas   = document.getElementById('orig-canvas');
+const rctx = resultCanvas.getContext('2d');
+const ectx = edgeCanvas.getContext('2d');
+const octx = origCanvas.getContext('2d');
+
+// ─── UI wiring ──────────────────────────────────────────────────────────────
+function wire(id, valId, fmt) {
+  const el = document.getElementById(id);
+  const vl = document.getElementById(valId);
+  el.addEventListener('input', () => { vl.textContent = fmt ? fmt(el.value) : el.value; });
+}
+wire('blur',       'blur-val');
+wire('low-thresh', 'low-val');
+wire('high-thresh','high-val');
+wire('iterations', 'iter-val');
+wire('tolerance',  'tol-val');
+wire('min-radius', 'minr-val');
+wire('max-radius', 'maxr-val');
+
+// Tabs
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    currentView = tab.dataset.view;
+    showView(currentView);
+  });
+});
+
+function showView(v) {
+  resultCanvas.style.display = 'none';
+  edgeCanvas.style.display   = 'none';
+  origCanvas.style.display   = 'none';
+  if (v === 'result' && srcImage)  resultCanvas.style.display = 'block';
+  if (v === 'edges'  && srcImage)  edgeCanvas.style.display   = 'block';
+  if (v === 'original' && srcImage) origCanvas.style.display  = 'block';
+}
+
+// Toggle redraw
+['show-edges','show-inliers','show-circle'].forEach(id => {
+  document.getElementById(id).addEventListener('change', drawResult);
+});
+
+// ─── Image loading ───────────────────────────────────────────────────────────
+const dropZone = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault(); dropZone.classList.remove('drag-over');
+  const f = e.dataTransfer.files[0];
+  if (f && f.type.startsWith('image/')) loadFile(f);
+});
+fileInput.addEventListener('change', () => { if (fileInput.files[0]) loadFile(fileInput.files[0]); });
+
+function loadFile(file) {
+  const url = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => {
+    srcImage = img;
+    URL.revokeObjectURL(url);
+    bestCircle = null;
+    edgePoints = [];
+    document.getElementById('placeholder').style.display = 'none';
+    document.getElementById('btn-run').disabled = false;
+    document.getElementById('stats-panel').style.display = 'none';
+
+    // Draw to all canvases at natural size
+    [resultCanvas, edgeCanvas, origCanvas].forEach(c => {
+      c.width = img.naturalWidth;
+      c.height = img.naturalHeight;
+    });
+    octx.drawImage(img, 0, 0);
+    rctx.drawImage(img, 0, 0);
+
+    showView('result');
+    resultCanvas.style.display = 'block';
+    status(`Image loaded: ${img.naturalWidth}×${img.naturalHeight} px. Adjust settings and click Run RANSAC.`);
+  };
+  img.src = url;
+}
+
+function status(msg) { document.getElementById('status').textContent = msg; }
+
+// ─── Gaussian kernel ─────────────────────────────────────────────────────────
+function makeGaussian(sigma) {
+  const r = Math.ceil(sigma * 3);
+  const size = 2 * r + 1;
+  const kernel = new Float32Array(size);
+  let sum = 0;
+  for (let i = 0; i < size; i++) {
+    const x = i - r;
+    kernel[i] = Math.exp(-(x * x) / (2 * sigma * sigma));
+    sum += kernel[i];
+  }
+  for (let i = 0; i < size; i++) kernel[i] /= sum;
+  return { kernel, r };
+}
+
+function convolve1D(data, w, h, kernel, r, horizontal) {
+  const out = new Float32Array(data.length);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let sum = 0;
+      for (let k = -r; k <= r; k++) {
+        const nx = horizontal ? Math.max(0, Math.min(w - 1, x + k)) : x;
+        const ny = horizontal ? y : Math.max(0, Math.min(h - 1, y + k));
+        sum += data[ny * w + nx] * kernel[k + r];
+      }
+      out[y * w + x] = sum;
+    }
+  }
+  return out;
+}
+
+function gaussianBlur(gray, w, h, sigma) {
+  const { kernel, r } = makeGaussian(sigma);
+  const tmp = convolve1D(gray, w, h, kernel, r, true);
+  return convolve1D(tmp, w, h, kernel, r, false);
+}
+
+// ─── Canny edge detection ────────────────────────────────────────────────────
+function canny(imageData, sigma, lowT, highT) {
+  const { data, width: w, height: h } = imageData;
+  const N = w * h;
+
+  // Grayscale
+  const gray = new Float32Array(N);
+  for (let i = 0; i < N; i++) {
+    const p = i * 4;
+    gray[i] = 0.299 * data[p] + 0.587 * data[p+1] + 0.114 * data[p+2];
+  }
+
+  // Blur
+  const blurred = gaussianBlur(gray, w, h, sigma);
+
+  // Sobel gradients
+  const gx = new Float32Array(N);
+  const gy = new Float32Array(N);
+  const mag = new Float32Array(N);
+  const ang = new Float32Array(N);
+
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      const tl = blurred[(y-1)*w+(x-1)], tm = blurred[(y-1)*w+x], tr = blurred[(y-1)*w+(x+1)];
+      const ml = blurred[y*w+(x-1)],               mr = blurred[y*w+(x+1)];
+      const bl = blurred[(y+1)*w+(x-1)], bm = blurred[(y+1)*w+x], br = blurred[(y+1)*w+(x+1)];
+
+      gx[i] = (tr + 2*mr + br) - (tl + 2*ml + bl);
+      gy[i] = (bl + 2*bm + br) - (tl + 2*tm + tr);
+      mag[i] = Math.sqrt(gx[i]*gx[i] + gy[i]*gy[i]);
+      ang[i] = Math.atan2(gy[i], gx[i]);
+    }
+  }
+
+  // Non-maximum suppression
+  const nms = new Float32Array(N);
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      const a = ((ang[i] * 180 / Math.PI) + 180) % 180;
+      let n1, n2;
+      if      (a < 22.5 || a >= 157.5) { n1 = mag[i-1];       n2 = mag[i+1]; }
+      else if (a < 67.5)                { n1 = mag[(y-1)*w+(x+1)]; n2 = mag[(y+1)*w+(x-1)]; }
+      else if (a < 112.5)               { n1 = mag[(y-1)*w+x];  n2 = mag[(y+1)*w+x]; }
+      else                              { n1 = mag[(y-1)*w+(x-1)]; n2 = mag[(y+1)*w+(x+1)]; }
+      nms[i] = (mag[i] >= n1 && mag[i] >= n2) ? mag[i] : 0;
+    }
+  }
+
+  // Double threshold + hysteresis
+  const STRONG = 255, WEAK = 50, NONE = 0;
+  const edge = new Uint8Array(N);
+  for (let i = 0; i < N; i++) {
+    if      (nms[i] >= highT) edge[i] = STRONG;
+    else if (nms[i] >= lowT)  edge[i] = WEAK;
+  }
+
+  // Hysteresis: promote WEAK connected to STRONG
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (let y = 1; y < h - 1; y++) {
+      for (let x = 1; x < w - 1; x++) {
+        const i = y * w + x;
+        if (edge[i] !== WEAK) continue;
+        const neighbors = [
+          edge[(y-1)*w+(x-1)], edge[(y-1)*w+x], edge[(y-1)*w+(x+1)],
+          edge[y*w+(x-1)],                        edge[y*w+(x+1)],
+          edge[(y+1)*w+(x-1)], edge[(y+1)*w+x], edge[(y+1)*w+(x+1)]
+        ];
+        if (neighbors.some(n => n === STRONG)) { edge[i] = STRONG; changed = true; }
+      }
+    }
+  }
+  for (let i = 0; i < N; i++) if (edge[i] === WEAK) edge[i] = NONE;
+
+  return edge;
+}
+
+// ─── Circle through 3 points ─────────────────────────────────────────────────
+function circleFrom3(p1, p2, p3) {
+  const ax = p1.x, ay = p1.y;
+  const bx = p2.x, by = p2.y;
+  const cx = p3.x, cy = p3.y;
+  const D = 2 * (ax*(by - cy) + bx*(cy - ay) + cx*(ay - by));
+  if (Math.abs(D) < 1e-6) return null; // collinear
+  const a2 = ax*ax + ay*ay, b2 = bx*bx + by*by, c2 = cx*cx + cy*cy;
+  const ux = (a2*(by - cy) + b2*(cy - ay) + c2*(ay - by)) / D;
+  const uy = (a2*(cx - bx) + b2*(ax - cx) + c2*(bx - ax)) / D;
+  const r  = Math.sqrt((ax - ux)**2 + (ay - uy)**2);
+  return { cx: ux, cy: uy, r };
+}
+
+// ─── RANSAC ──────────────────────────────────────────────────────────────────
+function ransac(pts, iterations, tol, minR, maxR) {
+  if (pts.length < 3) return null;
+  let best = null;
+  let bestCount = 0;
+
+  for (let iter = 0; iter < iterations; iter++) {
+    // Sample 3 distinct random points
+    const i1 = (Math.random() * pts.length) | 0;
+    let i2, i3;
+    do { i2 = (Math.random() * pts.length) | 0; } while (i2 === i1);
+    do { i3 = (Math.random() * pts.length) | 0; } while (i3 === i1 || i3 === i2);
+
+    const circle = circleFrom3(pts[i1], pts[i2], pts[i3]);
+    if (!circle || circle.r < minR || circle.r > maxR) continue;
+
+    // Count inliers
+    let count = 0;
+    for (let j = 0; j < pts.length; j++) {
+      const d = Math.abs(Math.sqrt((pts[j].x - circle.cx)**2 + (pts[j].y - circle.cy)**2) - circle.r);
+      if (d <= tol) count++;
+    }
+
+    if (count > bestCount) {
+      bestCount = count;
+      best = { ...circle, inlierCount: count };
+    }
+  }
+
+  if (!best) return null;
+
+  // Collect actual inlier points
+  const inliers = pts.filter(p => {
+    const d = Math.abs(Math.sqrt((p.x - best.cx)**2 + (p.y - best.cy)**2) - best.r);
+    return d <= tol;
+  });
+
+  // Refine: least-squares refit on inliers using algebraic method
+  const refined = algebraicCircleFit(inliers);
+  if (refined && refined.r >= minR && refined.r <= maxR) {
+    // Recount inliers for refined circle
+    const refinedInliers = pts.filter(p => {
+      const d = Math.abs(Math.sqrt((p.x - refined.cx)**2 + (p.y - refined.cy)**2) - refined.r);
+      return d <= tol;
+    });
+    if (refinedInliers.length >= inliers.length) {
+      return { ...refined, inliers: refinedInliers };
+    }
+  }
+
+  return { ...best, inliers };
+}
+
+// Algebraic least-squares circle fit (Kasa method)
+function algebraicCircleFit(pts) {
+  if (pts.length < 3) return null;
+  const n = pts.length;
+  let sumX=0, sumY=0, sumX2=0, sumY2=0, sumX3=0, sumY3=0, sumXY=0, sumXY2=0, sumX2Y=0;
+  for (const {x,y} of pts) {
+    sumX+=x; sumY+=y; sumX2+=x*x; sumY2+=y*y;
+    sumX3+=x*x*x; sumY3+=y*y*y; sumXY+=x*y; sumXY2+=x*y*y; sumX2Y+=x*x*y;
+  }
+  const A = [[sumX2, sumXY, sumX], [sumXY, sumY2, sumY], [sumX, sumY, n]];
+  const B = [-(sumX3 + sumXY2), -(sumX2Y + sumY3), -(sumX2 + sumY2)];
+  const sol = solve3x3(A, B);
+  if (!sol) return null;
+  const cx = -sol[0] / 2;
+  const cy = -sol[1] / 2;
+  const r  = Math.sqrt(cx*cx + cy*cy - sol[2]);
+  if (isNaN(r) || r <= 0) return null;
+  return { cx, cy, r };
+}
+
+// Cramer's rule for 3x3
+function solve3x3(A, B) {
+  const det = (m) =>
+    m[0][0]*(m[1][1]*m[2][2]-m[1][2]*m[2][1])
+   -m[0][1]*(m[1][0]*m[2][2]-m[1][2]*m[2][0])
+   +m[0][2]*(m[1][0]*m[2][1]-m[1][1]*m[2][0]);
+  const d = det(A);
+  if (Math.abs(d) < 1e-10) return null;
+  const sub = (col, b) => A.map((row, i) => row.map((v, j) => j===col ? b[i] : v));
+  return [det(sub(0,B))/d, det(sub(1,B))/d, det(sub(2,B))/d];
+}
+
+// ─── Run pipeline ─────────────────────────────────────────────────────────────
+document.getElementById('btn-run').addEventListener('click', () => {
+  if (!srcImage) return;
+
+  const spinner = document.getElementById('spinner');
+  spinner.classList.add('show');
+  status('Running edge detection...');
+
+  // Defer to let the UI update
+  setTimeout(() => {
+    try { runPipeline(); }
+    catch(e) { status('Error: ' + e.message); }
+    finally   { spinner.classList.remove('show'); }
+  }, 30);
+});
+
+function runPipeline() {
+  const w = srcImage.naturalWidth, h = srcImage.naturalHeight;
+
+  // Get pixel data from original canvas
+  const imageData = octx.getImageData(0, 0, w, h);
+
+  const sigma  = parseFloat(document.getElementById('blur').value);
+  const lowT   = parseFloat(document.getElementById('low-thresh').value);
+  const highT  = parseFloat(document.getElementById('high-thresh').value);
+  const iters  = parseInt(document.getElementById('iterations').value);
+  const tol    = parseFloat(document.getElementById('tolerance').value);
+  const minR   = parseFloat(document.getElementById('min-radius').value);
+  const maxR   = parseFloat(document.getElementById('max-radius').value);
+
+  // Edge detection
+  const edges = canny(imageData, sigma, lowT, highT);
+
+  // Draw edge map
+  const edgeImgData = ectx.createImageData(w, h);
+  for (let i = 0; i < edges.length; i++) {
+    const v = edges[i];
+    edgeImgData.data[i*4]   = v;
+    edgeImgData.data[i*4+1] = v;
+    edgeImgData.data[i*4+2] = v;
+    edgeImgData.data[i*4+3] = 255;
+  }
+  ectx.putImageData(edgeImgData, 0, 0);
+
+  // Collect edge points (subsample if too many for speed)
+  edgePoints = [];
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (edges[y * w + x] === 255) edgePoints.push({ x, y });
+    }
+  }
+
+  const MAX_PTS = 8000;
+  let ransacPts = edgePoints;
+  if (edgePoints.length > MAX_PTS) {
+    // Random subsample for RANSAC (keep all for inlier counting)
+    const step = Math.ceil(edgePoints.length / MAX_PTS);
+    ransacPts = edgePoints.filter((_, i) => i % step === 0);
+  }
+
+  status(`Edge points: ${edgePoints.length}. Running RANSAC (${iters} iterations)...`);
+
+  bestCircle = ransac(ransacPts, iters, tol, minR, maxR);
+
+  drawResult();
+  updateStats();
+
+  if (bestCircle) {
+    status(`Done. Circle at (${bestCircle.cx.toFixed(1)}, ${bestCircle.cy.toFixed(1)}), r=${bestCircle.r.toFixed(1)} px, ${bestCircle.inliers.length} inliers.`);
+  } else {
+    status('No circle found. Try adjusting thresholds or RANSAC parameters.');
+  }
+}
+
+function drawResult() {
+  if (!srcImage) return;
+  const w = srcImage.naturalWidth, h = srcImage.naturalHeight;
+  rctx.drawImage(srcImage, 0, 0);
+
+  const showEdges   = document.getElementById('show-edges').checked;
+  const showInliers = document.getElementById('show-inliers').checked;
+  const showCircle  = document.getElementById('show-circle').checked;
+
+  if (showEdges && edgePoints.length) {
+    rctx.fillStyle = 'rgba(255,255,0,0.4)';
+    for (const {x, y} of edgePoints) rctx.fillRect(x, y, 1, 1);
+  }
+
+  if (bestCircle) {
+    if (showInliers && bestCircle.inliers.length) {
+      rctx.fillStyle = 'rgba(0,255,150,0.7)';
+      for (const {x, y} of bestCircle.inliers) rctx.fillRect(x-1, y-1, 2, 2);
+    }
+
+    if (showCircle) {
+      const lw = Math.max(2, Math.min(w, h) * 0.004);
+      rctx.beginPath();
+      rctx.arc(bestCircle.cx, bestCircle.cy, bestCircle.r, 0, Math.PI * 2);
+      rctx.strokeStyle = '#ff3c3c';
+      rctx.lineWidth = lw + 2;
+      rctx.stroke();
+      rctx.strokeStyle = '#ff9900';
+      rctx.lineWidth = lw;
+      rctx.stroke();
+
+      // Center crosshair
+      const cs = Math.max(8, bestCircle.r * 0.05);
+      rctx.strokeStyle = '#ff3c3c';
+      rctx.lineWidth = lw;
+      rctx.beginPath();
+      rctx.moveTo(bestCircle.cx - cs, bestCircle.cy);
+      rctx.lineTo(bestCircle.cx + cs, bestCircle.cy);
+      rctx.moveTo(bestCircle.cx, bestCircle.cy - cs);
+      rctx.lineTo(bestCircle.cx, bestCircle.cy + cs);
+      rctx.stroke();
+    }
+  }
+
+  showView(currentView);
+}
+
+function updateStats() {
+  const panel = document.getElementById('stats-panel');
+  if (!bestCircle) { panel.style.display = 'none'; return; }
+  panel.style.display = 'block';
+  document.getElementById('stat-cx').textContent = bestCircle.cx.toFixed(1);
+  document.getElementById('stat-cy').textContent = bestCircle.cy.toFixed(1);
+  document.getElementById('stat-r').textContent  = bestCircle.r.toFixed(1);
+  document.getElementById('stat-inliers').textContent = bestCircle.inliers.length;
+  document.getElementById('stat-edges').textContent   = edgePoints.length;
+  const score = edgePoints.length ? (bestCircle.inliers.length / edgePoints.length * 100).toFixed(1) : '—';
+  document.getElementById('stat-score').textContent = score;
+}
+</script>
+</body>
+</html>
