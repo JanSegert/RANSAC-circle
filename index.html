@@ -232,9 +232,17 @@
           <span>Auto thresholds (Otsu)</span>
           <label class="toggle"><input type="checkbox" id="auto-thresh" checked><span class="toggle-slider"></span></label>
         </div>
-        <div class="field">
+        <div class="toggle-row" style="margin-bottom:12px">
+          <span>Auto blur</span>
+          <label class="toggle"><input type="checkbox" id="auto-blur" checked><span class="toggle-slider"></span></label>
+        </div>
+        <div class="field" id="blur-field" style="display:none">
           <label>Gaussian blur <span id="blur-val">1.5</span></label>
           <input type="range" id="blur" min="0.5" max="4" step="0.5" value="1.5">
+        </div>
+        <div class="toggle-row" id="blur-display">
+          <span style="color:#aaa;font-size:0.83rem">Gaussian blur</span>
+          <span id="blur-val-display" style="color:#6c8ef5;font-weight:600;font-size:0.83rem">—</span>
         </div>
         <div class="field" id="low-thresh-field" style="display:none">
           <label>Low threshold <span id="low-val">20</span></label>
@@ -355,6 +363,15 @@ function wire(id, valId, fmt) {
 wire('blur',       'blur-val');
 wire('low-thresh', 'low-val');
 wire('high-thresh','high-val');
+
+function applyAutoBlurUI(auto) {
+  document.getElementById('blur-field').style.display   = auto ? 'none' : 'block';
+  document.getElementById('blur-display').style.display = auto ? 'flex' : 'none';
+}
+applyAutoBlurUI(true);
+document.getElementById('auto-blur').addEventListener('change', function() {
+  applyAutoBlurUI(this.checked);
+});
 
 function applyAutoThreshUI(auto) {
   document.getElementById('low-thresh-field').style.display    = auto ? 'none' : 'block';
@@ -477,6 +494,21 @@ function convolve1D(data, w, h, kernel, r, horizontal) {
   return out;
 }
 
+function estimateBlurSigma(gray, w, h) {
+  // Laplacian std dev as noise proxy (Immerkær 1996)
+  let sum = 0, count = 0;
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      const lap = gray[i-w] + gray[i+w] + gray[i-1] + gray[i+1] - 4 * gray[i];
+      sum += lap * lap;
+      count++;
+    }
+  }
+  const noiseStd = Math.sqrt(sum / count);
+  return Math.min(4.0, Math.max(0.5, noiseStd / 20));
+}
+
 function gaussianBlur(gray, w, h, sigma) {
   const { kernel, r } = makeGaussian(sigma);
   const tmp = convolve1D(gray, w, h, kernel, r, true);
@@ -550,17 +582,23 @@ function canny(imageData, sigma, lowT, highT) {
     }
   }
 
-  // Non-maximum suppression
+  // Non-maximum suppression (interpolated)
+  const bilinear = (fx, fy) => {
+    const x0 = Math.floor(fx), y0 = Math.floor(fy);
+    const x1 = x0 + 1,        y1 = y0 + 1;
+    if (x0 < 0 || y0 < 0 || x1 >= w || y1 >= h) return 0;
+    const tx = fx - x0, ty = fy - y0;
+    return (1-tx)*(1-ty)*mag[y0*w+x0] + tx*(1-ty)*mag[y0*w+x1]
+         + (1-tx)*   ty *mag[y1*w+x0] + tx*   ty *mag[y1*w+x1];
+  };
   const nms = new Float32Array(N);
   for (let y = 1; y < h - 1; y++) {
     for (let x = 1; x < w - 1; x++) {
       const i = y * w + x;
-      const a = ((ang[i] * 180 / Math.PI) + 180) % 180;
-      let n1, n2;
-      if      (a < 22.5 || a >= 157.5) { n1 = mag[i-1];       n2 = mag[i+1]; }
-      else if (a < 67.5)                { n1 = mag[(y-1)*w+(x+1)]; n2 = mag[(y+1)*w+(x-1)]; }
-      else if (a < 112.5)               { n1 = mag[(y-1)*w+x];  n2 = mag[(y+1)*w+x]; }
-      else                              { n1 = mag[(y-1)*w+(x-1)]; n2 = mag[(y+1)*w+(x+1)]; }
+      const dx = Math.cos(ang[i]);
+      const dy = Math.sin(ang[i]);
+      const n1 = bilinear(x + dx, y + dy);
+      const n2 = bilinear(x - dx, y - dy);
       nms[i] = (mag[i] >= n1 && mag[i] >= n2) ? mag[i] : 0;
     }
   }
@@ -736,7 +774,7 @@ function runPipeline() {
   // Get pixel data from original canvas
   const imageData = octx.getImageData(0, 0, w, h);
 
-  const sigma     = parseFloat(document.getElementById('blur').value);
+  const autoBlur  = document.getElementById('auto-blur').checked;
   const autoThresh = document.getElementById('auto-thresh').checked;
   const lowT      = autoThresh ? null : parseFloat(document.getElementById('low-thresh').value);
   const highT     = autoThresh ? null : parseFloat(document.getElementById('high-thresh').value);
@@ -745,6 +783,20 @@ function runPipeline() {
   const tol       = parseFloat(document.getElementById('tolerance').value);
   const minR      = parseFloat(document.getElementById('min-radius').value);
   const maxR      = parseFloat(document.getElementById('max-radius').value);
+
+  // Compute sigma (auto or manual)
+  let sigma;
+  if (autoBlur) {
+    const gray = new Float32Array(w * h);
+    for (let i = 0; i < w * h; i++) {
+      const p = i * 4;
+      gray[i] = 0.299 * imageData.data[p] + 0.587 * imageData.data[p+1] + 0.114 * imageData.data[p+2];
+    }
+    sigma = estimateBlurSigma(gray, w, h);
+    document.getElementById('blur-val-display').textContent = sigma.toFixed(1);
+  } else {
+    sigma = parseFloat(document.getElementById('blur').value);
+  }
 
   // Edge detection
   const { edge: edges, lowT: usedLowT, highT: usedHighT } = canny(imageData, sigma, lowT, highT);
