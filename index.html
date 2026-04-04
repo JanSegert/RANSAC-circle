@@ -204,6 +204,16 @@
     }
     #spinner.show { display: flex; }
 
+    .param-section {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #555;
+      margin-bottom: 10px;
+      padding-bottom: 4px;
+      border-bottom: 1px solid #2a2a2a;
+    }
+
     @media (max-width: 700px) {
       .layout { grid-template-columns: 1fr; }
     }
@@ -227,12 +237,10 @@
       </div>
 
       <div class="panel">
-        <h2>Edge Detection</h2>
-        <div class="toggle-row" style="margin-bottom:12px">
-          <span>Auto thresholds (Otsu)</span>
-          <label class="toggle"><input type="checkbox" id="auto-thresh" checked><span class="toggle-slider"></span></label>
-        </div>
-        <div class="toggle-row" style="margin-bottom:12px">
+        <h2>Parameters</h2>
+
+        <div class="param-section">Edge Detection</div>
+        <div class="toggle-row">
           <span>Auto blur</span>
           <label class="toggle"><input type="checkbox" id="auto-blur" checked><span class="toggle-slider"></span></label>
         </div>
@@ -243,6 +251,10 @@
         <div class="toggle-row" id="blur-display">
           <span style="color:#aaa;font-size:0.83rem">Gaussian blur</span>
           <span id="blur-val-display" style="color:#6c8ef5;font-weight:600;font-size:0.83rem">—</span>
+        </div>
+        <div class="toggle-row">
+          <span>Auto thresholds (Otsu)</span>
+          <label class="toggle"><input type="checkbox" id="auto-thresh" checked><span class="toggle-slider"></span></label>
         </div>
         <div class="field" id="low-thresh-field" style="display:none">
           <label>Low threshold <span id="low-val">20</span></label>
@@ -260,11 +272,9 @@
           <span style="color:#aaa;font-size:0.83rem">High threshold</span>
           <span id="high-val-display" style="color:#6c8ef5;font-weight:600;font-size:0.83rem">—</span>
         </div>
-      </div>
 
-      <div class="panel">
-        <h2>RANSAC</h2>
-        <div class="toggle-row" style="margin-bottom:12px">
+        <div class="param-section" style="margin-top:12px">RANSAC</div>
+        <div class="toggle-row">
           <span>Auto iterations</span>
           <label class="toggle"><input type="checkbox" id="auto-iters" checked><span class="toggle-slider"></span></label>
         </div>
@@ -276,9 +286,17 @@
           <span style="color:#aaa;font-size:0.83rem">Iterations</span>
           <span id="iters-val-display" style="color:#6c8ef5;font-weight:600;font-size:0.83rem">—</span>
         </div>
-        <div class="field">
+        <div class="toggle-row">
+          <span>Auto tolerance</span>
+          <label class="toggle"><input type="checkbox" id="auto-tol" checked><span class="toggle-slider"></span></label>
+        </div>
+        <div class="field" id="tol-field" style="display:none">
           <label>Inlier tolerance (px) <span id="tol-val">3</span></label>
           <input type="range" id="tolerance" min="1" max="20" step="1" value="3">
+        </div>
+        <div class="toggle-row" id="tol-display">
+          <span style="color:#aaa;font-size:0.83rem">Inlier tolerance (px)</span>
+          <span id="tol-val-display" style="color:#6c8ef5;font-weight:600;font-size:0.83rem">—</span>
         </div>
         <div class="field">
           <label>Min radius (px) <span id="minr-val">10</span></label>
@@ -288,17 +306,15 @@
           <label>Max radius (px) <span id="maxr-val">500</span></label>
           <input type="range" id="max-radius" min="20" max="2000" step="10" value="500">
         </div>
-      </div>
 
-      <div class="panel">
-        <h2>Display</h2>
+        <div class="param-section" style="margin-top:12px">Display</div>
         <div class="toggle-row">
-          <span>Show edge points</span>
-          <label class="toggle"><input type="checkbox" id="show-edges" checked><span class="toggle-slider"></span></label>
+          <span>Show inlier edge points</span>
+          <label class="toggle"><input type="checkbox" id="show-inliers" checked><span class="toggle-slider"></span></label>
         </div>
         <div class="toggle-row">
-          <span>Show inliers</span>
-          <label class="toggle"><input type="checkbox" id="show-inliers" checked><span class="toggle-slider"></span></label>
+          <span>Show outlier edge points</span>
+          <label class="toggle"><input type="checkbox" id="show-outliers" checked><span class="toggle-slider"></span></label>
         </div>
         <div class="toggle-row">
           <span>Show circle</span>
@@ -307,18 +323,6 @@
       </div>
 
       <button id="btn-run" disabled>Run RANSAC</button>
-
-      <div class="panel" id="stats-panel" style="display:none">
-        <h2>Result</h2>
-        <div class="stat-grid">
-          <div class="stat"><div class="val" id="stat-cx">—</div><div class="lbl">Center X</div></div>
-          <div class="stat"><div class="val" id="stat-cy">—</div><div class="lbl">Center Y</div></div>
-          <div class="stat"><div class="val" id="stat-r">—</div><div class="lbl">Radius (px)</div></div>
-          <div class="stat"><div class="val" id="stat-inliers">—</div><div class="lbl">Inliers</div></div>
-          <div class="stat"><div class="val" id="stat-edges">—</div><div class="lbl">Edge pts</div></div>
-          <div class="stat"><div class="val" id="stat-score">—</div><div class="lbl">Score %</div></div>
-        </div>
-      </div>
 
     </div>
 
@@ -337,6 +341,17 @@
         <div id="spinner">Running RANSAC...</div>
       </div>
       <div class="status-bar" id="status">No image loaded.</div>
+      <div class="panel" id="stats-panel" style="display:none; margin-top:12px">
+        <h2>Result</h2>
+        <div class="stat-grid">
+          <div class="stat"><div class="val" id="stat-cx">—</div><div class="lbl">Center X</div></div>
+          <div class="stat"><div class="val" id="stat-cy">—</div><div class="lbl">Center Y</div></div>
+          <div class="stat"><div class="val" id="stat-r">—</div><div class="lbl">Radius (px)</div></div>
+          <div class="stat"><div class="val" id="stat-inliers">—</div><div class="lbl">Inliers</div></div>
+          <div class="stat"><div class="val" id="stat-edges">—</div><div class="lbl">Edge pts</div></div>
+          <div class="stat"><div class="val" id="stat-score">—</div><div class="lbl">Score %</div></div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -363,6 +378,15 @@ function wire(id, valId, fmt) {
 wire('blur',       'blur-val');
 wire('low-thresh', 'low-val');
 wire('high-thresh','high-val');
+
+function applyAutoTolUI(auto) {
+  document.getElementById('tol-field').style.display   = auto ? 'none' : 'block';
+  document.getElementById('tol-display').style.display = auto ? 'flex' : 'none';
+}
+applyAutoTolUI(true);
+document.getElementById('auto-tol').addEventListener('change', function() {
+  applyAutoTolUI(this.checked);
+});
 
 function applyAutoBlurUI(auto) {
   document.getElementById('blur-field').style.display   = auto ? 'none' : 'block';
@@ -417,7 +441,7 @@ function showView(v) {
 }
 
 // Toggle redraw
-['show-edges','show-inliers','show-circle'].forEach(id => {
+['show-inliers','show-outliers','show-circle'].forEach(id => {
   document.getElementById(id).addEventListener('change', drawResult);
 });
 
@@ -494,20 +518,6 @@ function convolve1D(data, w, h, kernel, r, horizontal) {
   return out;
 }
 
-function estimateBlurSigma(gray, w, h) {
-  // Laplacian std dev as noise proxy (Immerkær 1996)
-  let sum = 0, count = 0;
-  for (let y = 1; y < h - 1; y++) {
-    for (let x = 1; x < w - 1; x++) {
-      const i = y * w + x;
-      const lap = gray[i-w] + gray[i+w] + gray[i-1] + gray[i+1] - 4 * gray[i];
-      sum += lap * lap;
-      count++;
-    }
-  }
-  const noiseStd = Math.sqrt(sum / count);
-  return Math.min(4.0, Math.max(0.5, noiseStd / 20));
-}
 
 function gaussianBlur(gray, w, h, sigma) {
   const { kernel, r } = makeGaussian(sigma);
@@ -780,22 +790,45 @@ function runPipeline() {
   const highT     = autoThresh ? null : parseFloat(document.getElementById('high-thresh').value);
   const autoIters = document.getElementById('auto-iters').checked;
   const iters     = autoIters ? null : parseInt(document.getElementById('iterations').value);
-  const tol       = parseFloat(document.getElementById('tolerance').value);
+  const autoTol   = document.getElementById('auto-tol').checked;
   const minR      = parseFloat(document.getElementById('min-radius').value);
   const maxR      = parseFloat(document.getElementById('max-radius').value);
 
-  // Compute sigma (auto or manual)
+  // Grayscale + noise estimate (needed for auto blur and/or auto tolerance)
+  let noiseStd = null;
   let sigma;
-  if (autoBlur) {
+  if (autoBlur || autoTol) {
     const gray = new Float32Array(w * h);
     for (let i = 0; i < w * h; i++) {
       const p = i * 4;
       gray[i] = 0.299 * imageData.data[p] + 0.587 * imageData.data[p+1] + 0.114 * imageData.data[p+2];
     }
-    sigma = estimateBlurSigma(gray, w, h);
-    document.getElementById('blur-val-display').textContent = sigma.toFixed(1);
+    // Compute noiseStd via Laplacian
+    let lapSumSq = 0;
+    for (let y = 1; y < h - 1; y++) {
+      for (let x = 1; x < w - 1; x++) {
+        const i = y * w + x;
+        const lap = gray[i-w] + gray[i+w] + gray[i-1] + gray[i+1] - 4 * gray[i];
+        lapSumSq += lap * lap;
+      }
+    }
+    noiseStd = Math.sqrt(lapSumSq / ((w-2) * (h-2)));
+    if (autoBlur) {
+      sigma = Math.min(4.0, Math.max(0.5, noiseStd / 20));
+      document.getElementById('blur-val-display').textContent = sigma.toFixed(1);
+    }
+  }
+  if (!autoBlur) sigma = parseFloat(document.getElementById('blur').value);
+
+  // Compute tolerance (auto or manual)
+  let tol;
+  if (autoTol) {
+    tol = noiseStd != null
+      ? Math.min(10, Math.max(1, Math.round(noiseStd / 15)))
+      : Math.max(1, Math.round(sigma));
+    document.getElementById('tol-val-display').textContent = tol;
   } else {
-    sigma = parseFloat(document.getElementById('blur').value);
+    tol = parseFloat(document.getElementById('tolerance').value);
   }
 
   // Edge detection
@@ -844,7 +877,6 @@ function runPipeline() {
 
 function drawEdgeMap(w, h) {
   const edgeImgData = ectx.createImageData(w, h);
-  // Default: black background
   for (let i = 0; i < w * h; i++) edgeImgData.data[i*4+3] = 255;
 
   if (bestCircle && bestCircle.inliers.length) {
@@ -852,24 +884,21 @@ function drawEdgeMap(w, h) {
     for (const {x, y} of edgePoints) {
       const i = y * w + x;
       if (inlierSet.has(x + ',' + y)) {
+        // Purple
+        edgeImgData.data[i*4]   = 160;
+        edgeImgData.data[i*4+1] = 50;
+        edgeImgData.data[i*4+2] = 220;
+      } else {
         // Green
         edgeImgData.data[i*4]   = 0;
         edgeImgData.data[i*4+1] = 210;
         edgeImgData.data[i*4+2] = 80;
-      } else {
-        // Yellow
-        edgeImgData.data[i*4]   = 220;
-        edgeImgData.data[i*4+1] = 180;
-        edgeImgData.data[i*4+2] = 0;
       }
     }
   } else {
-    // Grayscale fallback
     for (const {x, y} of edgePoints) {
       const i = y * w + x;
-      edgeImgData.data[i*4]   = 255;
-      edgeImgData.data[i*4+1] = 255;
-      edgeImgData.data[i*4+2] = 255;
+      edgeImgData.data[i*4] = edgeImgData.data[i*4+1] = edgeImgData.data[i*4+2] = 255;
     }
   }
   ectx.putImageData(edgeImgData, 0, 0);
@@ -880,32 +909,28 @@ function drawResult() {
   const w = srcImage.naturalWidth, h = srcImage.naturalHeight;
   rctx.drawImage(srcImage, 0, 0);
 
-  const showEdges   = document.getElementById('show-edges').checked;
-  const showInliers = document.getElementById('show-inliers').checked;
-  const showCircle  = document.getElementById('show-circle').checked;
+  const showInliers  = document.getElementById('show-inliers').checked;
+  const showOutliers = document.getElementById('show-outliers').checked;
+  const showCircle   = document.getElementById('show-circle').checked;
 
-  if (showEdges && edgePoints.length) {
-    if (bestCircle && bestCircle.inliers.length) {
-      const inlierSet = new Set(bestCircle.inliers.map(p => p.x + ',' + p.y));
-      rctx.fillStyle = 'rgba(180,140,0,0.8)';
+  if (edgePoints.length && bestCircle && bestCircle.inliers.length) {
+    const inlierSet = new Set(bestCircle.inliers.map(p => p.x + ',' + p.y));
+    if (showOutliers) {
+      rctx.fillStyle = 'rgba(0,210,80,0.9)';
       for (const {x, y} of edgePoints) {
         if (!inlierSet.has(x + ',' + y)) rctx.fillRect(x, y, 1, 1);
       }
-      if (showInliers) {
-        rctx.fillStyle = 'rgba(0,210,80,0.9)';
-        for (const {x, y} of bestCircle.inliers) rctx.fillRect(x, y, 1, 1);
-      }
-    } else {
-      rctx.fillStyle = 'rgba(180,140,0,0.8)';
-      for (const {x, y} of edgePoints) rctx.fillRect(x, y, 1, 1);
     }
+    if (showInliers) {
+      rctx.fillStyle = 'rgba(160,50,220,0.9)';
+      for (const {x, y} of bestCircle.inliers) rctx.fillRect(x, y, 1, 1);
+    }
+  } else if (edgePoints.length && showOutliers) {
+    rctx.fillStyle = 'rgba(0,210,80,0.9)';
+    for (const {x, y} of edgePoints) rctx.fillRect(x, y, 1, 1);
   }
 
   if (bestCircle) {
-    if (!showEdges && showInliers && bestCircle.inliers.length) {
-      rctx.fillStyle = 'rgba(0,210,80,0.9)';
-      for (const {x, y} of bestCircle.inliers) rctx.fillRect(x, y, 1, 1);
-    }
 
     if (showCircle) {
       rctx.beginPath();
