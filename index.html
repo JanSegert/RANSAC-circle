@@ -9,7 +9,7 @@
 
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #111;
+      background: #e8f5e9;
       color: #ddd;
       min-height: 100vh;
       padding: 24px;
@@ -228,17 +228,21 @@
 
       <div class="panel">
         <h2>Edge Detection</h2>
+        <div class="toggle-row" style="margin-bottom:12px">
+          <span>Auto thresholds (Otsu)</span>
+          <label class="toggle"><input type="checkbox" id="auto-thresh" checked><span class="toggle-slider"></span></label>
+        </div>
         <div class="field">
           <label>Gaussian blur <span id="blur-val">1.5</span></label>
           <input type="range" id="blur" min="0.5" max="4" step="0.5" value="1.5">
         </div>
         <div class="field">
           <label>Low threshold <span id="low-val">20</span></label>
-          <input type="range" id="low-thresh" min="5" max="100" step="5" value="20">
+          <input type="range" id="low-thresh" min="5" max="100" step="5" value="20" disabled>
         </div>
         <div class="field">
           <label>High threshold <span id="high-val">50</span></label>
-          <input type="range" id="high-thresh" min="10" max="200" step="10" value="50">
+          <input type="range" id="high-thresh" min="10" max="200" step="10" value="50" disabled>
         </div>
       </div>
 
@@ -335,6 +339,11 @@ function wire(id, valId, fmt) {
 wire('blur',       'blur-val');
 wire('low-thresh', 'low-val');
 wire('high-thresh','high-val');
+
+document.getElementById('auto-thresh').addEventListener('change', function() {
+  document.getElementById('low-thresh').disabled = this.checked;
+  document.getElementById('high-thresh').disabled = this.checked;
+});
 wire('iterations', 'iter-val');
 wire('tolerance',  'tol-val');
 wire('min-radius', 'minr-val');
@@ -443,6 +452,38 @@ function gaussianBlur(gray, w, h, sigma) {
   return convolve1D(tmp, w, h, kernel, r, false);
 }
 
+// ─── Otsu threshold on gradient magnitudes ───────────────────────────────────
+function otsuThreshold(values) {
+  let maxVal = 0;
+  for (let i = 0; i < values.length; i++) if (values[i] > maxVal) maxVal = values[i];
+  if (maxVal === 0) return 0;
+
+  const bins = 256;
+  const hist = new Float32Array(bins);
+  for (let i = 0; i < values.length; i++) {
+    const bin = Math.min(bins - 1, Math.floor(values[i] / maxVal * (bins - 1)));
+    hist[bin]++;
+  }
+  const total = values.length;
+  for (let i = 0; i < bins; i++) hist[i] /= total;
+
+  let sum = 0;
+  for (let i = 0; i < bins; i++) sum += i * hist[i];
+
+  let sumB = 0, wB = 0, maxVar = 0, threshold = 0;
+  for (let t = 0; t < bins; t++) {
+    wB += hist[t];
+    if (wB === 0 || wB === 1) continue;
+    const wF = 1 - wB;
+    sumB += t * hist[t];
+    const mB = sumB / wB;
+    const mF = (sum - sumB) / wF;
+    const varBetween = wB * wF * (mB - mF) ** 2;
+    if (varBetween > maxVar) { maxVar = varBetween; threshold = t; }
+  }
+  return threshold / (bins - 1) * maxVal;
+}
+
 // ─── Canny edge detection ────────────────────────────────────────────────────
 function canny(imageData, sigma, lowT, highT) {
   const { data, width: w, height: h } = imageData;
@@ -493,6 +534,12 @@ function canny(imageData, sigma, lowT, highT) {
     }
   }
 
+  // Auto thresholds via Otsu if not provided
+  if (lowT == null || highT == null) {
+    highT = otsuThreshold(nms);
+    lowT  = highT / 2;
+  }
+
   // Double threshold + hysteresis
   const STRONG = 255, WEAK = 50, NONE = 0;
   const edge = new Uint8Array(N);
@@ -520,7 +567,7 @@ function canny(imageData, sigma, lowT, highT) {
   }
   for (let i = 0; i < N; i++) if (edge[i] === WEAK) edge[i] = NONE;
 
-  return edge;
+  return { edge, lowT, highT };
 }
 
 // ─── Circle through 3 points ─────────────────────────────────────────────────
@@ -644,16 +691,27 @@ function runPipeline() {
   // Get pixel data from original canvas
   const imageData = octx.getImageData(0, 0, w, h);
 
-  const sigma  = parseFloat(document.getElementById('blur').value);
-  const lowT   = parseFloat(document.getElementById('low-thresh').value);
-  const highT  = parseFloat(document.getElementById('high-thresh').value);
-  const iters  = parseInt(document.getElementById('iterations').value);
-  const tol    = parseFloat(document.getElementById('tolerance').value);
-  const minR   = parseFloat(document.getElementById('min-radius').value);
-  const maxR   = parseFloat(document.getElementById('max-radius').value);
+  const sigma     = parseFloat(document.getElementById('blur').value);
+  const autoThresh = document.getElementById('auto-thresh').checked;
+  const lowT      = autoThresh ? null : parseFloat(document.getElementById('low-thresh').value);
+  const highT     = autoThresh ? null : parseFloat(document.getElementById('high-thresh').value);
+  const iters     = parseInt(document.getElementById('iterations').value);
+  const tol       = parseFloat(document.getElementById('tolerance').value);
+  const minR      = parseFloat(document.getElementById('min-radius').value);
+  const maxR      = parseFloat(document.getElementById('max-radius').value);
 
   // Edge detection
-  const edges = canny(imageData, sigma, lowT, highT);
+  const { edge: edges, lowT: usedLowT, highT: usedHighT } = canny(imageData, sigma, lowT, highT);
+
+  // Reflect auto-computed thresholds back to sliders
+  if (autoThresh) {
+    const lowEl  = document.getElementById('low-thresh');
+    const highEl = document.getElementById('high-thresh');
+    lowEl.value  = Math.round(usedLowT);
+    highEl.value = Math.round(usedHighT);
+    document.getElementById('low-val').textContent  = Math.round(usedLowT);
+    document.getElementById('high-val').textContent = Math.round(usedHighT);
+  }
 
   // Draw edge map
   const edgeImgData = ectx.createImageData(w, h);
@@ -717,14 +775,10 @@ function drawResult() {
     }
 
     if (showCircle) {
-      const lw = Math.max(2, Math.min(w, h) * 0.004);
       rctx.beginPath();
       rctx.arc(bestCircle.cx, bestCircle.cy, bestCircle.r, 0, Math.PI * 2);
-      rctx.strokeStyle = '#ff3c3c';
-      rctx.lineWidth = lw + 2;
-      rctx.stroke();
       rctx.strokeStyle = '#ff9900';
-      rctx.lineWidth = lw;
+      rctx.lineWidth = 1;
       rctx.stroke();
 
       // Center crosshair
