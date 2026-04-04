@@ -236,21 +236,37 @@
           <label>Gaussian blur <span id="blur-val">1.5</span></label>
           <input type="range" id="blur" min="0.5" max="4" step="0.5" value="1.5">
         </div>
-        <div class="field">
+        <div class="field" id="low-thresh-field" style="display:none">
           <label>Low threshold <span id="low-val">20</span></label>
-          <input type="range" id="low-thresh" min="5" max="100" step="5" value="20" disabled>
+          <input type="range" id="low-thresh" min="5" max="100" step="5" value="20">
         </div>
-        <div class="field">
+        <div class="toggle-row" id="low-thresh-display">
+          <span style="color:#aaa;font-size:0.83rem">Low threshold</span>
+          <span id="low-val-display" style="color:#6c8ef5;font-weight:600;font-size:0.83rem">—</span>
+        </div>
+        <div class="field" id="high-thresh-field" style="display:none">
           <label>High threshold <span id="high-val">50</span></label>
-          <input type="range" id="high-thresh" min="10" max="200" step="10" value="50" disabled>
+          <input type="range" id="high-thresh" min="10" max="200" step="10" value="50">
+        </div>
+        <div class="toggle-row" id="high-thresh-display">
+          <span style="color:#aaa;font-size:0.83rem">High threshold</span>
+          <span id="high-val-display" style="color:#6c8ef5;font-weight:600;font-size:0.83rem">—</span>
         </div>
       </div>
 
       <div class="panel">
         <h2>RANSAC</h2>
-        <div class="field">
+        <div class="toggle-row" style="margin-bottom:12px">
+          <span>Auto iterations</span>
+          <label class="toggle"><input type="checkbox" id="auto-iters" checked><span class="toggle-slider"></span></label>
+        </div>
+        <div class="field" id="iters-field" style="display:none">
           <label>Iterations <span id="iter-val">1000</span></label>
           <input type="range" id="iterations" min="100" max="5000" step="100" value="1000">
+        </div>
+        <div class="toggle-row" id="iters-display">
+          <span style="color:#aaa;font-size:0.83rem">Iterations</span>
+          <span id="iters-val-display" style="color:#6c8ef5;font-weight:600;font-size:0.83rem">—</span>
         </div>
         <div class="field">
           <label>Inlier tolerance (px) <span id="tol-val">3</span></label>
@@ -340,9 +356,24 @@ wire('blur',       'blur-val');
 wire('low-thresh', 'low-val');
 wire('high-thresh','high-val');
 
+function applyAutoThreshUI(auto) {
+  document.getElementById('low-thresh-field').style.display    = auto ? 'none' : 'block';
+  document.getElementById('low-thresh-display').style.display  = auto ? 'flex' : 'none';
+  document.getElementById('high-thresh-field').style.display   = auto ? 'none' : 'block';
+  document.getElementById('high-thresh-display').style.display = auto ? 'flex' : 'none';
+}
+applyAutoThreshUI(true);
 document.getElementById('auto-thresh').addEventListener('change', function() {
-  document.getElementById('low-thresh').disabled = this.checked;
-  document.getElementById('high-thresh').disabled = this.checked;
+  applyAutoThreshUI(this.checked);
+});
+
+function applyAutoItersUI(auto) {
+  document.getElementById('iters-field').style.display   = auto ? 'none' : 'block';
+  document.getElementById('iters-display').style.display = auto ? 'flex' : 'none';
+}
+applyAutoItersUI(true);
+document.getElementById('auto-iters').addEventListener('change', function() {
+  applyAutoItersUI(this.checked);
 });
 wire('iterations', 'iter-val');
 wire('tolerance',  'tol-val');
@@ -589,8 +620,11 @@ function ransac(pts, iterations, tol, minR, maxR) {
   if (pts.length < 3) return null;
   let best = null;
   let bestCount = 0;
+  const AUTO = iterations == null;
+  const MIN_ITERS = 100, MAX_ITERS = 5000;
+  let N = AUTO ? MAX_ITERS : iterations;
 
-  for (let iter = 0; iter < iterations; iter++) {
+  for (let iter = 0; iter < N; iter++) {
     // Sample 3 distinct random points
     const i1 = (Math.random() * pts.length) | 0;
     let i2, i3;
@@ -610,10 +644,21 @@ function ransac(pts, iterations, tol, minR, maxR) {
     if (count > bestCount) {
       bestCount = count;
       best = { ...circle, inlierCount: count };
+
+      // Adaptive: recompute N using current inlier fraction estimate
+      if (AUTO && count > 0) {
+        const w = count / pts.length;
+        const den = Math.log(1 - Math.pow(w, 3));
+        if (den < 0) {
+          const adaptN = Math.ceil(Math.log(1 - 0.99) / den);
+          N = Math.min(N, Math.max(MIN_ITERS, adaptN));
+        }
+      }
     }
   }
 
   if (!best) return null;
+  best.itersUsed = N;
 
   // Collect actual inlier points
   const inliers = pts.filter(p => {
@@ -695,7 +740,8 @@ function runPipeline() {
   const autoThresh = document.getElementById('auto-thresh').checked;
   const lowT      = autoThresh ? null : parseFloat(document.getElementById('low-thresh').value);
   const highT     = autoThresh ? null : parseFloat(document.getElementById('high-thresh').value);
-  const iters     = parseInt(document.getElementById('iterations').value);
+  const autoIters = document.getElementById('auto-iters').checked;
+  const iters     = autoIters ? null : parseInt(document.getElementById('iterations').value);
   const tol       = parseFloat(document.getElementById('tolerance').value);
   const minR      = parseFloat(document.getElementById('min-radius').value);
   const maxR      = parseFloat(document.getElementById('max-radius').value);
@@ -703,26 +749,11 @@ function runPipeline() {
   // Edge detection
   const { edge: edges, lowT: usedLowT, highT: usedHighT } = canny(imageData, sigma, lowT, highT);
 
-  // Reflect auto-computed thresholds back to sliders
+  // Reflect auto-computed thresholds to display
   if (autoThresh) {
-    const lowEl  = document.getElementById('low-thresh');
-    const highEl = document.getElementById('high-thresh');
-    lowEl.value  = Math.round(usedLowT);
-    highEl.value = Math.round(usedHighT);
-    document.getElementById('low-val').textContent  = Math.round(usedLowT);
-    document.getElementById('high-val').textContent = Math.round(usedHighT);
+    document.getElementById('low-val-display').textContent  = Math.round(usedLowT);
+    document.getElementById('high-val-display').textContent = Math.round(usedHighT);
   }
-
-  // Draw edge map
-  const edgeImgData = ectx.createImageData(w, h);
-  for (let i = 0; i < edges.length; i++) {
-    const v = edges[i];
-    edgeImgData.data[i*4]   = v;
-    edgeImgData.data[i*4+1] = v;
-    edgeImgData.data[i*4+2] = v;
-    edgeImgData.data[i*4+3] = 255;
-  }
-  ectx.putImageData(edgeImgData, 0, 0);
 
   // Collect edge points (subsample if too many for speed)
   edgePoints = [];
@@ -740,10 +771,15 @@ function runPipeline() {
     ransacPts = edgePoints.filter((_, i) => i % step === 0);
   }
 
-  status(`Edge points: ${edgePoints.length}. Running RANSAC (${iters} iterations)...`);
+  status(`Edge points: ${edgePoints.length}. Running RANSAC...`);
 
   bestCircle = ransac(ransacPts, iters, tol, minR, maxR);
 
+  if (autoIters && bestCircle) {
+    document.getElementById('iters-val-display').textContent = bestCircle.itersUsed;
+  }
+
+  drawEdgeMap(w, h);
   drawResult();
   updateStats();
 
@@ -752,6 +788,39 @@ function runPipeline() {
   } else {
     status('No circle found. Try adjusting thresholds or RANSAC parameters.');
   }
+}
+
+function drawEdgeMap(w, h) {
+  const edgeImgData = ectx.createImageData(w, h);
+  // Default: black background
+  for (let i = 0; i < w * h; i++) edgeImgData.data[i*4+3] = 255;
+
+  if (bestCircle && bestCircle.inliers.length) {
+    const inlierSet = new Set(bestCircle.inliers.map(p => p.x + ',' + p.y));
+    for (const {x, y} of edgePoints) {
+      const i = y * w + x;
+      if (inlierSet.has(x + ',' + y)) {
+        // Green
+        edgeImgData.data[i*4]   = 0;
+        edgeImgData.data[i*4+1] = 210;
+        edgeImgData.data[i*4+2] = 80;
+      } else {
+        // Yellow
+        edgeImgData.data[i*4]   = 220;
+        edgeImgData.data[i*4+1] = 180;
+        edgeImgData.data[i*4+2] = 0;
+      }
+    }
+  } else {
+    // Grayscale fallback
+    for (const {x, y} of edgePoints) {
+      const i = y * w + x;
+      edgeImgData.data[i*4]   = 255;
+      edgeImgData.data[i*4+1] = 255;
+      edgeImgData.data[i*4+2] = 255;
+    }
+  }
+  ectx.putImageData(edgeImgData, 0, 0);
 }
 
 function drawResult() {
@@ -764,27 +833,39 @@ function drawResult() {
   const showCircle  = document.getElementById('show-circle').checked;
 
   if (showEdges && edgePoints.length) {
-    rctx.fillStyle = 'rgba(255,255,0,0.4)';
-    for (const {x, y} of edgePoints) rctx.fillRect(x, y, 1, 1);
+    if (bestCircle && bestCircle.inliers.length) {
+      const inlierSet = new Set(bestCircle.inliers.map(p => p.x + ',' + p.y));
+      rctx.fillStyle = 'rgba(180,140,0,0.8)';
+      for (const {x, y} of edgePoints) {
+        if (!inlierSet.has(x + ',' + y)) rctx.fillRect(x, y, 1, 1);
+      }
+      if (showInliers) {
+        rctx.fillStyle = 'rgba(0,210,80,0.9)';
+        for (const {x, y} of bestCircle.inliers) rctx.fillRect(x, y, 1, 1);
+      }
+    } else {
+      rctx.fillStyle = 'rgba(180,140,0,0.8)';
+      for (const {x, y} of edgePoints) rctx.fillRect(x, y, 1, 1);
+    }
   }
 
   if (bestCircle) {
-    if (showInliers && bestCircle.inliers.length) {
-      rctx.fillStyle = 'rgba(0,255,150,0.7)';
-      for (const {x, y} of bestCircle.inliers) rctx.fillRect(x-1, y-1, 2, 2);
+    if (!showEdges && showInliers && bestCircle.inliers.length) {
+      rctx.fillStyle = 'rgba(0,210,80,0.9)';
+      for (const {x, y} of bestCircle.inliers) rctx.fillRect(x, y, 1, 1);
     }
 
     if (showCircle) {
       rctx.beginPath();
       rctx.arc(bestCircle.cx, bestCircle.cy, bestCircle.r, 0, Math.PI * 2);
-      rctx.strokeStyle = '#ff9900';
+      rctx.strokeStyle = '#ff0000';
       rctx.lineWidth = 1;
       rctx.stroke();
 
       // Center crosshair
       const cs = Math.max(8, bestCircle.r * 0.05);
       rctx.strokeStyle = '#ff3c3c';
-      rctx.lineWidth = lw;
+      rctx.lineWidth = 1;
       rctx.beginPath();
       rctx.moveTo(bestCircle.cx - cs, bestCircle.cy);
       rctx.lineTo(bestCircle.cx + cs, bestCircle.cy);
