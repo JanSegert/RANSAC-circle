@@ -128,7 +128,9 @@
     button:hover { background: #5a7ae0; }
     button:disabled { background: #2a2a2a; color: #555; cursor: not-allowed; }
 
-    #btn-run { margin-top: 4px; }
+    #btn-run { background: #c45e00; }
+    #btn-run:hover { background: #a34e00; }
+    #btn-run:disabled { background: #2a2a2a; color: #555; }
 
     /* Stats */
     .stat-grid {
@@ -251,6 +253,8 @@
         </div>
       </div>
 
+      <button id="btn-run" disabled>Run RANSAC</button>
+
       <div class="panel">
         <h2>Parameters</h2>
 
@@ -323,8 +327,6 @@
         </div>
 
       </div>
-
-      <button id="btn-run" disabled>Run RANSAC</button>
 
     </div>
 
@@ -739,7 +741,7 @@ function ransac(pts, iterations, tol, minR, maxR) {
       return d <= tol;
     });
     if (refinedInliers.length >= inliers.length) {
-      return { ...refined, inliers: refinedInliers };
+      return { ...refined, inliers: refinedInliers, itersUsed: N };
     }
   }
 
@@ -934,6 +936,25 @@ function drawResult() {
   const showOutliers = document.getElementById('show-outliers').checked;
   const showCircle   = document.getElementById('show-circle').checked;
 
+  if (bestCircle && showCircle) {
+    rctx.beginPath();
+    rctx.arc(bestCircle.cx, bestCircle.cy, bestCircle.r, 0, Math.PI * 2);
+    rctx.strokeStyle = '#ff0000';
+    rctx.lineWidth = 1;
+    rctx.stroke();
+
+    // Center crosshair
+    const cs = Math.max(8, bestCircle.r * 0.05);
+    rctx.strokeStyle = '#ff3c3c';
+    rctx.lineWidth = 1;
+    rctx.beginPath();
+    rctx.moveTo(bestCircle.cx - cs, bestCircle.cy);
+    rctx.lineTo(bestCircle.cx + cs, bestCircle.cy);
+    rctx.moveTo(bestCircle.cx, bestCircle.cy - cs);
+    rctx.lineTo(bestCircle.cx, bestCircle.cy + cs);
+    rctx.stroke();
+  }
+
   if (edgePoints.length && bestCircle && bestCircle.inliers.length) {
     const inlierSet = new Set(bestCircle.inliers.map(p => p.x + ',' + p.y));
     if (showOutliers) {
@@ -949,28 +970,6 @@ function drawResult() {
   } else if (edgePoints.length && showOutliers) {
     rctx.fillStyle = 'rgba(50,120,220,0.9)';
     for (const {x, y} of edgePoints) rctx.fillRect(x, y, 1, 1);
-  }
-
-  if (bestCircle) {
-
-    if (showCircle) {
-      rctx.beginPath();
-      rctx.arc(bestCircle.cx, bestCircle.cy, bestCircle.r, 0, Math.PI * 2);
-      rctx.strokeStyle = '#ff0000';
-      rctx.lineWidth = 1;
-      rctx.stroke();
-
-      // Center crosshair
-      const cs = Math.max(8, bestCircle.r * 0.05);
-      rctx.strokeStyle = '#ff3c3c';
-      rctx.lineWidth = 1;
-      rctx.beginPath();
-      rctx.moveTo(bestCircle.cx - cs, bestCircle.cy);
-      rctx.lineTo(bestCircle.cx + cs, bestCircle.cy);
-      rctx.moveTo(bestCircle.cx, bestCircle.cy - cs);
-      rctx.lineTo(bestCircle.cx, bestCircle.cy + cs);
-      rctx.stroke();
-    }
   }
 
   showView(currentView);
