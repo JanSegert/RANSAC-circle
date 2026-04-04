@@ -204,6 +204,21 @@
     }
     #spinner.show { display: flex; }
 
+    .display-toggles {
+      display: flex;
+      gap: 24px;
+      padding: 10px 4px;
+      flex-wrap: wrap;
+    }
+    .display-toggle-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.83rem;
+      color: #aaa;
+      cursor: pointer;
+    }
+
     .param-section {
       font-size: 0.72rem;
       text-transform: uppercase;
@@ -307,19 +322,6 @@
           <input type="range" id="max-radius" min="20" max="2000" step="10" value="500">
         </div>
 
-        <div class="param-section" style="margin-top:12px">Display</div>
-        <div class="toggle-row">
-          <span>Show inlier edge points</span>
-          <label class="toggle"><input type="checkbox" id="show-inliers" checked><span class="toggle-slider"></span></label>
-        </div>
-        <div class="toggle-row">
-          <span>Show outlier edge points</span>
-          <label class="toggle"><input type="checkbox" id="show-outliers" checked><span class="toggle-slider"></span></label>
-        </div>
-        <div class="toggle-row">
-          <span>Show circle</span>
-          <label class="toggle"><input type="checkbox" id="show-circle" checked><span class="toggle-slider"></span></label>
-        </div>
       </div>
 
       <button id="btn-run" disabled>Run RANSAC</button>
@@ -340,7 +342,20 @@
         <canvas id="orig-canvas" style="display:none"></canvas>
         <div id="spinner">Running RANSAC...</div>
       </div>
-      <div class="status-bar" id="status">No image loaded.</div>
+      <div class="display-toggles">
+        <label class="display-toggle-item">
+          <span>Show inlier edge points</span>
+          <label class="toggle"><input type="checkbox" id="show-inliers" checked><span class="toggle-slider"></span></label>
+        </label>
+        <label class="display-toggle-item">
+          <span>Show outlier edge points</span>
+          <label class="toggle"><input type="checkbox" id="show-outliers" checked><span class="toggle-slider"></span></label>
+        </label>
+        <label class="display-toggle-item">
+          <span>Show circle</span>
+          <label class="toggle"><input type="checkbox" id="show-circle" checked><span class="toggle-slider"></span></label>
+        </label>
+      </div>
       <div class="panel" id="stats-panel" style="display:none; margin-top:12px">
         <h2>Result</h2>
         <div class="stat-grid">
@@ -352,6 +367,7 @@
           <div class="stat"><div class="val" id="stat-score">—</div><div class="lbl">Score %</div></div>
         </div>
       </div>
+      <div class="status-bar" id="status">No image loaded.</div>
     </div>
   </div>
 
@@ -831,8 +847,11 @@ function runPipeline() {
     tol = parseFloat(document.getElementById('tolerance').value);
   }
 
+  const t0 = performance.now();
+
   // Edge detection
   const { edge: edges, lowT: usedLowT, highT: usedHighT } = canny(imageData, sigma, lowT, highT);
+  const t1 = performance.now();
 
   // Reflect auto-computed thresholds to display
   if (autoThresh) {
@@ -856,9 +875,9 @@ function runPipeline() {
     ransacPts = edgePoints.filter((_, i) => i % step === 0);
   }
 
-  status(`Edge points: ${edgePoints.length}. Running RANSAC...`);
-
+  const t2 = performance.now();
   bestCircle = ransac(ransacPts, iters, tol, minR, maxR);
+  const t3 = performance.now();
 
   if (autoIters && bestCircle) {
     document.getElementById('iters-val-display').textContent = bestCircle.itersUsed;
@@ -867,11 +886,13 @@ function runPipeline() {
   drawEdgeMap(w, h);
   drawResult();
   updateStats();
+  const t4 = performance.now();
 
+  const ms = (a, b) => (b - a).toFixed(0) + 'ms';
   if (bestCircle) {
-    status(`Done. Circle at (${bestCircle.cx.toFixed(1)}, ${bestCircle.cy.toFixed(1)}), r=${bestCircle.r.toFixed(1)} px, ${bestCircle.inliers.length} inliers.`);
+    status(`Edge detection: ${ms(t0,t1)}  |  RANSAC: ${ms(t2,t3)}  |  Render: ${ms(t3,t4)}  |  Total: ${ms(t0,t4)}`);
   } else {
-    status('No circle found. Try adjusting thresholds or RANSAC parameters.');
+    status(`No circle found.  |  Edge detection: ${ms(t0,t1)}  |  RANSAC: ${ms(t2,t3)}  |  Total: ${ms(t0,t4)}`);
   }
 }
 
@@ -884,15 +905,15 @@ function drawEdgeMap(w, h) {
     for (const {x, y} of edgePoints) {
       const i = y * w + x;
       if (inlierSet.has(x + ',' + y)) {
-        // Purple
-        edgeImgData.data[i*4]   = 160;
-        edgeImgData.data[i*4+1] = 50;
-        edgeImgData.data[i*4+2] = 220;
-      } else {
         // Green
         edgeImgData.data[i*4]   = 0;
         edgeImgData.data[i*4+1] = 210;
         edgeImgData.data[i*4+2] = 80;
+      } else {
+        // Blue
+        edgeImgData.data[i*4]   = 50;
+        edgeImgData.data[i*4+1] = 120;
+        edgeImgData.data[i*4+2] = 220;
       }
     }
   } else {
@@ -916,17 +937,17 @@ function drawResult() {
   if (edgePoints.length && bestCircle && bestCircle.inliers.length) {
     const inlierSet = new Set(bestCircle.inliers.map(p => p.x + ',' + p.y));
     if (showOutliers) {
-      rctx.fillStyle = 'rgba(0,210,80,0.9)';
+      rctx.fillStyle = 'rgba(50,120,220,0.9)';
       for (const {x, y} of edgePoints) {
         if (!inlierSet.has(x + ',' + y)) rctx.fillRect(x, y, 1, 1);
       }
     }
     if (showInliers) {
-      rctx.fillStyle = 'rgba(160,50,220,0.9)';
+      rctx.fillStyle = 'rgba(0,210,80,0.9)';
       for (const {x, y} of bestCircle.inliers) rctx.fillRect(x, y, 1, 1);
     }
   } else if (edgePoints.length && showOutliers) {
-    rctx.fillStyle = 'rgba(0,210,80,0.9)';
+    rctx.fillStyle = 'rgba(50,120,220,0.9)';
     for (const {x, y} of edgePoints) rctx.fillRect(x, y, 1, 1);
   }
 
