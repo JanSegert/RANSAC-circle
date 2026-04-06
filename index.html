@@ -344,7 +344,7 @@
       <div class="canvas-wrap">
         <div id="placeholder">Load an image to begin</div>
         <canvas id="result-canvas" style="display:none"></canvas>
-        <canvas id="edge-canvas" style="display:none"></canvas>
+        <canvas id="edge-canvas" style="display:none; image-rendering:pixelated"></canvas>
         <canvas id="orig-canvas" style="display:none"></canvas>
         <div id="spinner">Running RANSAC...</div>
       </div>
@@ -924,6 +924,12 @@ function runPipeline() {
   currentDs = ds;
   edgeCanvas.width  = dw;
   edgeCanvas.height = dh;
+  // Display edge canvas at the same size the result canvas (w×h) would appear:
+  // CSS rule is max-width:100%, max-height:70vh — compute the scale factor
+  const container = resultCanvas.parentElement;
+  const scale = Math.min(1, container.clientWidth / w, window.innerHeight * 0.70 / h);
+  edgeCanvas.style.width  = Math.round(w * scale) + 'px';
+  edgeCanvas.style.height = Math.round(h * scale) + 'px';
   drawEdgeMap(dw, dh);
   drawResult();
   updateStats();
