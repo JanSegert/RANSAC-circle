@@ -384,6 +384,18 @@
         </div>
       </div>
       <div class="status-bar" id="status">No image loaded.</div>
+      <div class="panel" id="histogram-panel" style="margin-top:12px; display:none">
+        <div style="display:flex; gap:16px;">
+          <div style="flex:1; min-width:0">
+            <div style="font-size:0.75rem; color:#666; margin-bottom:6px; text-transform:uppercase; letter-spacing:0.06em">Grayscale Intensity</div>
+            <canvas id="hist-gray" style="width:100%; height:120px; display:block; background:#111; border-radius:4px"></canvas>
+          </div>
+          <div style="flex:1; min-width:0">
+            <div style="font-size:0.75rem; color:#666; margin-bottom:6px; text-transform:uppercase; letter-spacing:0.06em">Gradient Magnitude</div>
+            <canvas id="hist-grad" style="width:100%; height:120px; display:block; background:#111; border-radius:4px"></canvas>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -528,6 +540,7 @@ function loadFile(file) {
 
     showView('result');
     resultCanvas.style.display = 'block';
+    drawGrayscaleHistogram();
     status(`Image loaded: ${img.naturalWidth}×${img.naturalHeight} px. Adjust settings and click Run RANSAC.`);
   };
   img.src = url;
@@ -708,7 +721,7 @@ function canny(imageData, sigma, lowT, highT, threshMode = 'otsu', threshPct = 1
   }
   for (let i = 0; i < N; i++) if (edge[i] === WEAK) edge[i] = NONE;
 
-  return { edge, lowT, highT };
+  return { edge, lowT, highT, nms };
 }
 
 // ─── Circle through 3 points ─────────────────────────────────────────────────
@@ -908,7 +921,7 @@ function runPipeline() {
   const t0 = performance.now();
 
   // Edge detection on downsampled image
-  const { edge: edges, lowT: usedLowT, highT: usedHighT } = canny(imageData, sigma, lowT, highT, threshMode, threshPct);
+  const { edge: edges, lowT: usedLowT, highT: usedHighT, nms } = canny(imageData, sigma, lowT, highT, threshMode, threshPct);
   const t1 = performance.now();
 
   if (threshMode !== 'manual') {
@@ -999,6 +1012,7 @@ function runPipeline() {
   }
 
   updateStats();
+  drawGradientHistogram(nms, usedLowT, usedHighT);
   const t4 = performance.now();
 
   const ms = (a, b) => (b - a).toFixed(0) + 'ms';
@@ -1144,6 +1158,74 @@ function drawDsResult() {
       }
     }
   }
+}
+
+function drawHistogram(canvasId, values, bins, color, markers) {
+  const canvas = document.getElementById(canvasId);
+  const W = canvas.clientWidth || 300, H = canvas.clientHeight || 120;
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+
+  // Build histogram
+  let maxVal = 0;
+  for (let i = 0; i < values.length; i++) if (values[i] > maxVal) maxVal = values[i];
+  if (maxVal === 0) return;
+  const hist = new Float32Array(bins);
+  for (let i = 0; i < values.length; i++) {
+    const b = Math.min(bins - 1, Math.floor(values[i] / maxVal * (bins - 1)));
+    hist[b]++;
+  }
+  // Use log scale so the sparse high-magnitude tail is visible
+  const logHist = new Float32Array(bins);
+  let maxLog = 0;
+  for (let b = 0; b < bins; b++) {
+    logHist[b] = hist[b] > 0 ? Math.log1p(hist[b]) : 0;
+    if (logHist[b] > maxLog) maxLog = logHist[b];
+  }
+
+  // Draw bars
+  const bw = W / bins;
+  ctx.fillStyle = color;
+  for (let b = 0; b < bins; b++) {
+    const barH = Math.round(logHist[b] / maxLog * H);
+    ctx.fillRect(b * bw, H - barH, Math.max(1, bw - 0.5), barH);
+  }
+
+  // Draw threshold markers
+  if (markers) {
+    for (const { value, color: mc, label } of markers) {
+      const x = Math.round(value / maxVal * W);
+      ctx.strokeStyle = mc;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+      if (label) {
+        ctx.fillStyle = mc;
+        ctx.font = '10px sans-serif';
+        ctx.fillText(label, Math.min(x + 2, W - 20), 10);
+      }
+    }
+  }
+}
+
+function drawGrayscaleHistogram() {
+  if (!srcImage) return;
+  document.getElementById('histogram-panel').style.display = 'block';
+  const w = srcImage.naturalWidth, h = srcImage.naturalHeight;
+  const data = octx.getImageData(0, 0, w, h).data;
+  const gray = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    const p = i * 4;
+    gray[i] = 0.299 * data[p] + 0.587 * data[p+1] + 0.114 * data[p+2];
+  }
+  drawHistogram('hist-gray', gray, 256, '#6c8ef5', null);
+}
+
+function drawGradientHistogram(nms, lowT, highT) {
+  drawHistogram('hist-grad', nms, 256, '#aaa', [
+    { value: lowT,  color: '#4af', label: 'Lo' },
+    { value: highT, color: '#fa4', label: 'Hi' },
+  ]);
 }
 
 function updateStats() {
