@@ -275,23 +275,31 @@
           <span style="color:#aaa;font-size:0.83rem">Gaussian blur</span>
           <span id="blur-val-display" style="color:#6c8ef5;font-weight:600;font-size:0.83rem">—</span>
         </div>
-        <div class="toggle-row">
-          <span>Auto thresholds (Otsu)</span>
-          <label class="toggle"><input type="checkbox" id="auto-thresh" checked><span class="toggle-slider"></span></label>
+        <div class="field">
+          <label>Threshold mode <span></span></label>
+          <select id="thresh-mode" style="width:100%;background:#2a2a2a;color:#ddd;border:1px solid #444;border-radius:6px;padding:5px 8px;font-size:0.83rem">
+            <option value="otsu">Otsu</option>
+            <option value="percentile" selected>Percentile</option>
+            <option value="manual">Manual</option>
+          </select>
+        </div>
+        <div class="field" id="pct-field">
+          <label>Strong edge % <span id="pct-val">10</span></label>
+          <input type="range" id="thresh-pct" min="1" max="30" step="1" value="10">
         </div>
         <div class="field" id="low-thresh-field" style="display:none">
           <label>Low threshold <span id="low-val">20</span></label>
-          <input type="range" id="low-thresh" min="5" max="100" step="5" value="20">
+          <input type="range" id="low-thresh" min="1" max="200" step="1" value="20">
         </div>
-        <div class="toggle-row" id="low-thresh-display">
+        <div class="toggle-row" id="low-thresh-display" style="display:none">
           <span style="color:#aaa;font-size:0.83rem">Low threshold</span>
           <span id="low-val-display" style="color:#6c8ef5;font-weight:600;font-size:0.83rem">—</span>
         </div>
         <div class="field" id="high-thresh-field" style="display:none">
           <label>High threshold <span id="high-val">50</span></label>
-          <input type="range" id="high-thresh" min="10" max="200" step="10" value="50">
+          <input type="range" id="high-thresh" min="1" max="200" step="1" value="50">
         </div>
-        <div class="toggle-row" id="high-thresh-display">
+        <div class="toggle-row" id="high-thresh-display" style="display:none">
           <span style="color:#aaa;font-size:0.83rem">High threshold</span>
           <span id="high-val-display" style="color:#6c8ef5;font-weight:600;font-size:0.83rem">—</span>
         </div>
@@ -386,7 +394,8 @@ let edgePoints = [];        // [{x,y}] in original image coords
 let bestCircle = null;      // {cx, cy, r, inliers:[{x,y}]} in original image coords
 let edgePointsDs = [];      // [{x,y}] in downsampled coords (for edge map)
 let bestCircleDs = null;    // {cx, cy, r, inliers:[{x,y}]} in downsampled coords
-let currentDs = 1;          // active downsample factor
+let currentDs  = 1;          // active downsample factor
+let currentTol = 1;          // inlier tolerance in original image coords
 let currentView = 'result';
 
 const resultCanvas   = document.getElementById('result-canvas');
@@ -428,15 +437,20 @@ document.getElementById('auto-blur').addEventListener('change', function() {
   applyAutoBlurUI(this.checked);
 });
 
-function applyAutoThreshUI(auto) {
-  document.getElementById('low-thresh-field').style.display    = auto ? 'none' : 'block';
-  document.getElementById('low-thresh-display').style.display  = auto ? 'flex' : 'none';
-  document.getElementById('high-thresh-field').style.display   = auto ? 'none' : 'block';
-  document.getElementById('high-thresh-display').style.display = auto ? 'flex' : 'none';
+wire('thresh-pct', 'pct-val');
+
+function applyThreshModeUI(mode) {
+  const isManual = mode === 'manual';
+  const isPct    = mode === 'percentile';
+  document.getElementById('pct-field').style.display          = isPct    ? 'block' : 'none';
+  document.getElementById('low-thresh-field').style.display   = isManual ? 'block' : 'none';
+  document.getElementById('high-thresh-field').style.display  = isManual ? 'block' : 'none';
+  document.getElementById('low-thresh-display').style.display = isManual ? 'none'  : 'flex';
+  document.getElementById('high-thresh-display').style.display= isManual ? 'none'  : 'flex';
 }
-applyAutoThreshUI(true);
-document.getElementById('auto-thresh').addEventListener('change', function() {
-  applyAutoThreshUI(this.checked);
+applyThreshModeUI('percentile');
+document.getElementById('thresh-mode').addEventListener('change', function() {
+  applyThreshModeUI(this.value);
 });
 
 function applyAutoItersUI(auto) {
@@ -591,8 +605,18 @@ function otsuThreshold(values) {
   return threshold / (bins - 1) * maxVal;
 }
 
+// Percentile threshold: high = value exceeded by topPct% of non-zero NMS pixels
+function percentileThreshold(values, topPct) {
+  const nonzero = [];
+  for (let i = 0; i < values.length; i++) if (values[i] > 0) nonzero.push(values[i]);
+  if (nonzero.length === 0) return 0;
+  nonzero.sort((a, b) => a - b);
+  const idx = Math.max(0, Math.floor((1 - topPct / 100) * nonzero.length));
+  return nonzero[idx];
+}
+
 // ─── Canny edge detection ────────────────────────────────────────────────────
-function canny(imageData, sigma, lowT, highT) {
+function canny(imageData, sigma, lowT, highT, threshMode = 'otsu', threshPct = 10) {
   const { data, width: w, height: h } = imageData;
   const N = w * h;
 
@@ -647,10 +671,14 @@ function canny(imageData, sigma, lowT, highT) {
     }
   }
 
-  // Auto thresholds via Otsu if not provided
+  // Compute thresholds based on selected mode
   if (lowT == null || highT == null) {
-    highT = otsuThreshold(nms);
-    lowT  = highT / 2;
+    if (threshMode === 'percentile') {
+      highT = percentileThreshold(nms, threshPct);
+    } else {
+      highT = otsuThreshold(nms);
+    }
+    lowT = highT * 0.4;
   }
 
   // Double threshold + hysteresis
@@ -831,9 +859,10 @@ function runPipeline() {
   }
 
   const autoBlur   = document.getElementById('auto-blur').checked;
-  const autoThresh = document.getElementById('auto-thresh').checked;
-  const lowT       = autoThresh ? null : parseFloat(document.getElementById('low-thresh').value);
-  const highT      = autoThresh ? null : parseFloat(document.getElementById('high-thresh').value);
+  const threshMode = document.getElementById('thresh-mode').value;
+  const lowT  = threshMode === 'manual' ? parseFloat(document.getElementById('low-thresh').value)  : null;
+  const highT = threshMode === 'manual' ? parseFloat(document.getElementById('high-thresh').value) : null;
+  const threshPct = parseFloat(document.getElementById('thresh-pct').value);
   const autoIters  = document.getElementById('auto-iters').checked;
   const iters      = autoIters ? null : parseInt(document.getElementById('iterations').value);
   const autoTol    = document.getElementById('auto-tol').checked;
@@ -879,10 +908,10 @@ function runPipeline() {
   const t0 = performance.now();
 
   // Edge detection on downsampled image
-  const { edge: edges, lowT: usedLowT, highT: usedHighT } = canny(imageData, sigma, lowT, highT);
+  const { edge: edges, lowT: usedLowT, highT: usedHighT } = canny(imageData, sigma, lowT, highT, threshMode, threshPct);
   const t1 = performance.now();
 
-  if (autoThresh) {
+  if (threshMode !== 'manual') {
     document.getElementById('low-val-display').textContent  = Math.round(usedLowT);
     document.getElementById('high-val-display').textContent = Math.round(usedHighT);
   }
@@ -911,14 +940,25 @@ function runPipeline() {
   // Store downsampled circle for edge map
   bestCircleDs = circleDs;
 
-  // Scale circle and inliers back to original coordinates for result canvas
+  // Recompute inliers for bestCircleDs from ALL downsampled edge points (not just RANSAC subsample)
   if (circleDs) {
+    bestCircleDs = { ...circleDs, inliers: edgePointsDs.filter(p => {
+      const d = Math.abs(Math.sqrt((p.x - circleDs.cx)**2 + (p.y - circleDs.cy)**2) - circleDs.r);
+      return d <= tol;
+    })};
+  }
+
+  // Scale circle to original coordinates; recompute inliers from ALL original edge points
+  if (circleDs) {
+    const cx = circleDs.cx * ds, cy = circleDs.cy * ds, r = circleDs.r * ds;
+    const tolOrig = tol * ds;
     bestCircle = {
-      cx: circleDs.cx * ds,
-      cy: circleDs.cy * ds,
-      r:  circleDs.r  * ds,
+      cx, cy, r,
       itersUsed: circleDs.itersUsed,
-      inliers: circleDs.inliers.map(p => ({ x: p.x * ds, y: p.y * ds })),
+      inliers: edgePoints.filter(p => {
+        const d = Math.abs(Math.sqrt((p.x - cx)**2 + (p.y - cy)**2) - r);
+        return d <= tolOrig;
+      }),
     };
   } else {
     bestCircle = null;
@@ -929,6 +969,7 @@ function runPipeline() {
   }
 
   currentDs = ds;
+  currentTol = tol * ds;
   edgeCanvas.width  = dw;
   edgeCanvas.height = dh;
   // Display edge canvas at the same size the result canvas (w×h) would appear:
