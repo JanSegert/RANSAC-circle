@@ -338,13 +338,15 @@
     <div class="canvas-area">
       <div class="view-tabs">
         <button class="tab active" data-view="result">Result</button>
-        <button class="tab" data-view="edges">Edge Map</button>
+        <button class="tab" data-view="edges">Downsampled Edge Map</button>
+        <button class="tab" id="tab-ds-result" data-view="ds-result" style="display:none">Downsampled Result</button>
         <button class="tab" data-view="original">Original</button>
       </div>
       <div class="canvas-wrap">
         <div id="placeholder">Load an image to begin</div>
         <canvas id="result-canvas" style="display:none"></canvas>
         <canvas id="edge-canvas" style="display:none; image-rendering:pixelated"></canvas>
+        <canvas id="ds-result-canvas" style="display:none; image-rendering:pixelated"></canvas>
         <canvas id="orig-canvas" style="display:none"></canvas>
         <div id="spinner">Running RANSAC...</div>
       </div>
@@ -387,12 +389,14 @@ let bestCircleDs = null;    // {cx, cy, r, inliers:[{x,y}]} in downsampled coord
 let currentDs = 1;          // active downsample factor
 let currentView = 'result';
 
-const resultCanvas = document.getElementById('result-canvas');
-const edgeCanvas   = document.getElementById('edge-canvas');
-const origCanvas   = document.getElementById('orig-canvas');
-const rctx = resultCanvas.getContext('2d');
-const ectx = edgeCanvas.getContext('2d');
-const octx = origCanvas.getContext('2d');
+const resultCanvas   = document.getElementById('result-canvas');
+const edgeCanvas     = document.getElementById('edge-canvas');
+const dsResultCanvas = document.getElementById('ds-result-canvas');
+const origCanvas     = document.getElementById('orig-canvas');
+const rctx  = resultCanvas.getContext('2d');
+const ectx  = edgeCanvas.getContext('2d');
+const dsctx = dsResultCanvas.getContext('2d');
+const octx  = origCanvas.getContext('2d');
 
 // ─── UI wiring ──────────────────────────────────────────────────────────────
 function wire(id, valId, fmt) {
@@ -459,17 +463,20 @@ document.querySelectorAll('.tab').forEach(tab => {
 });
 
 function showView(v) {
-  resultCanvas.style.display = 'none';
-  edgeCanvas.style.display   = 'none';
-  origCanvas.style.display   = 'none';
-  if (v === 'result' && srcImage)  resultCanvas.style.display = 'block';
-  if (v === 'edges'  && srcImage)  edgeCanvas.style.display   = 'block';
-  if (v === 'original' && srcImage) origCanvas.style.display  = 'block';
+  resultCanvas.style.display   = 'none';
+  edgeCanvas.style.display     = 'none';
+  dsResultCanvas.style.display = 'none';
+  origCanvas.style.display     = 'none';
+  if (!srcImage) return;
+  if (v === 'result')    resultCanvas.style.display   = 'block';
+  if (v === 'edges')     edgeCanvas.style.display     = 'block';
+  if (v === 'ds-result') dsResultCanvas.style.display = 'block';
+  if (v === 'original')  origCanvas.style.display     = 'block';
 }
 
 // Toggle redraw
 ['show-inliers','show-outliers','show-circle'].forEach(id => {
-  document.getElementById(id).addEventListener('change', drawResult);
+  document.getElementById(id).addEventListener('change', () => { drawResult(); if (currentDs > 1) drawDsResult(); });
 });
 
 // ─── Image loading ───────────────────────────────────────────────────────────
@@ -932,6 +939,24 @@ function runPipeline() {
   edgeCanvas.style.height = Math.round(h * scale) + 'px';
   drawEdgeMap(dw, dh);
   drawResult();
+
+  // Downsampled Result tab: show only when ds > 1
+  const tabDs = document.getElementById('tab-ds-result');
+  if (ds > 1) {
+    dsResultCanvas.width  = dw;
+    dsResultCanvas.height = dh;
+    dsResultCanvas.style.width  = Math.round(w * scale) + 'px';
+    dsResultCanvas.style.height = Math.round(h * scale) + 'px';
+    drawDsResult();
+    tabDs.style.display = '';
+  } else {
+    tabDs.style.display = 'none';
+    if (currentView === 'ds-result') {
+      currentView = 'result';
+      document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.view === 'result'));
+    }
+  }
+
   updateStats();
   const t4 = performance.now();
 
@@ -987,16 +1012,15 @@ function drawResult() {
   const showCircle   = document.getElementById('show-circle').checked;
 
   if (bestCircle && showCircle) {
+    rctx.lineWidth = currentDs;
     rctx.beginPath();
     rctx.arc(bestCircle.cx, bestCircle.cy, bestCircle.r, 0, Math.PI * 2);
     rctx.strokeStyle = '#ff0000';
-    rctx.lineWidth = 1;
     rctx.stroke();
 
     // Center crosshair
-    const cs = Math.max(8, bestCircle.r * 0.05);
+    const cs = Math.max(8 * currentDs, bestCircle.r * 0.05);
     rctx.strokeStyle = '#ff3c3c';
-    rctx.lineWidth = 1;
     rctx.beginPath();
     rctx.moveTo(bestCircle.cx - cs, bestCircle.cy);
     rctx.lineTo(bestCircle.cx + cs, bestCircle.cy);
@@ -1005,24 +1029,80 @@ function drawResult() {
     rctx.stroke();
   }
 
+  const pr = currentDs / 2; // disc radius = half the downsample factor
+  const disc = (ctx, pts) => {
+    ctx.beginPath();
+    for (const {x, y} of pts) {
+      ctx.moveTo(x + pr, y);
+      ctx.arc(x, y, pr, 0, Math.PI * 2);
+    }
+    ctx.fill();
+  };
+
   if (edgePoints.length && bestCircle && bestCircle.inliers.length) {
     const inlierSet = new Set(bestCircle.inliers.map(p => p.x + ',' + p.y));
     if (showOutliers) {
       rctx.fillStyle = 'rgba(50,120,220,0.9)';
-      for (const {x, y} of edgePoints) {
-        if (!inlierSet.has(x + ',' + y)) rctx.fillRect(x, y, 1, 1);
-      }
+      disc(rctx, edgePoints.filter(p => !inlierSet.has(p.x + ',' + p.y)));
     }
     if (showInliers) {
       rctx.fillStyle = 'rgba(0,210,80,0.9)';
-      for (const {x, y} of bestCircle.inliers) rctx.fillRect(x, y, 1, 1);
+      disc(rctx, bestCircle.inliers);
     }
   } else if (edgePoints.length && showOutliers) {
     rctx.fillStyle = 'rgba(50,120,220,0.9)';
-    for (const {x, y} of edgePoints) rctx.fillRect(x, y, 1, 1);
+    disc(rctx, edgePoints);
   }
 
   showView(currentView);
+}
+
+function drawDsResult() {
+  const dw = dsResultCanvas.width, dh = dsResultCanvas.height;
+
+  // Draw downsampled image
+  const tmp = document.createElement('canvas');
+  tmp.width = dw; tmp.height = dh;
+  tmp.getContext('2d').drawImage(srcImage, 0, 0, dw, dh);
+  dsctx.drawImage(tmp, 0, 0);
+
+  const showInliers  = document.getElementById('show-inliers').checked;
+  const showOutliers = document.getElementById('show-outliers').checked;
+  const showCircle   = document.getElementById('show-circle').checked;
+
+  if (bestCircleDs) {
+    // Draw circle first, then points on top
+    if (showCircle) {
+      dsctx.beginPath();
+      dsctx.arc(bestCircleDs.cx, bestCircleDs.cy, bestCircleDs.r, 0, Math.PI * 2);
+      dsctx.strokeStyle = '#ff0000';
+      dsctx.lineWidth = 1;
+      dsctx.stroke();
+
+      const cs = Math.max(4, bestCircleDs.r * 0.05);
+      dsctx.strokeStyle = '#ff3c3c';
+      dsctx.beginPath();
+      dsctx.moveTo(bestCircleDs.cx - cs, bestCircleDs.cy);
+      dsctx.lineTo(bestCircleDs.cx + cs, bestCircleDs.cy);
+      dsctx.moveTo(bestCircleDs.cx, bestCircleDs.cy - cs);
+      dsctx.lineTo(bestCircleDs.cx, bestCircleDs.cy + cs);
+      dsctx.stroke();
+    }
+
+    if (edgePointsDs.length && bestCircleDs.inliers.length) {
+      const inlierSet = new Set(bestCircleDs.inliers.map(p => p.x + ',' + p.y));
+      if (showOutliers) {
+        dsctx.fillStyle = 'rgba(50,120,220,0.9)';
+        for (const {x, y} of edgePointsDs) {
+          if (!inlierSet.has(x + ',' + y)) dsctx.fillRect(x, y, 1, 1);
+        }
+      }
+      if (showInliers) {
+        dsctx.fillStyle = 'rgba(0,210,80,0.9)';
+        for (const {x, y} of bestCircleDs.inliers) dsctx.fillRect(x, y, 1, 1);
+      }
+    }
+  }
 }
 
 function updateStats() {
