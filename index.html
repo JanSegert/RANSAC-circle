@@ -259,6 +259,10 @@
         <h2>Parameters</h2>
 
         <div class="param-section">Edge Detection</div>
+        <div class="field">
+          <label>Downsample <span id="ds-val">1×</span></label>
+          <input type="range" id="downsample" min="0" max="3" step="1" value="0">
+        </div>
         <div class="toggle-row">
           <span>Auto blur</span>
           <label class="toggle"><input type="checkbox" id="auto-blur" checked><span class="toggle-slider"></span></label>
@@ -376,8 +380,11 @@
 <script>
 // ─── Globals ────────────────────────────────────────────────────────────────
 let srcImage = null;
-let edgePoints = [];        // [{x,y}]
-let bestCircle = null;      // {cx, cy, r, inliers:[{x,y}]}
+let edgePoints = [];        // [{x,y}] in original image coords
+let bestCircle = null;      // {cx, cy, r, inliers:[{x,y}]} in original image coords
+let edgePointsDs = [];      // [{x,y}] in downsampled coords (for edge map)
+let bestCircleDs = null;    // {cx, cy, r, inliers:[{x,y}]} in downsampled coords
+let currentDs = 1;          // active downsample factor
 let currentView = 'result';
 
 const resultCanvas = document.getElementById('result-canvas');
@@ -393,6 +400,8 @@ function wire(id, valId, fmt) {
   const vl = document.getElementById(valId);
   el.addEventListener('input', () => { vl.textContent = fmt ? fmt(el.value) : el.value; });
 }
+const DS_LABELS = ['1×','2×','4×','8×'];
+wire('downsample', 'ds-val', v => DS_LABELS[v]);
 wire('blur',       'blur-val');
 wire('low-thresh', 'low-val');
 wire('high-thresh','high-val');
@@ -799,38 +808,49 @@ document.getElementById('btn-run').addEventListener('click', () => {
 function runPipeline() {
   const w = srcImage.naturalWidth, h = srcImage.naturalHeight;
 
-  // Get pixel data from original canvas
-  const imageData = octx.getImageData(0, 0, w, h);
+  const ds = [1,2,4,8][parseInt(document.getElementById('downsample').value)];
+  const dw = Math.round(w / ds), dh = Math.round(h / ds);
 
-  const autoBlur  = document.getElementById('auto-blur').checked;
+  // Get pixel data (downsampled if ds > 1)
+  let imageData;
+  if (ds === 1) {
+    imageData = octx.getImageData(0, 0, w, h);
+  } else {
+    const tmp = document.createElement('canvas');
+    tmp.width = dw; tmp.height = dh;
+    const tctx = tmp.getContext('2d');
+    tctx.drawImage(srcImage, 0, 0, dw, dh);
+    imageData = tctx.getImageData(0, 0, dw, dh);
+  }
+
+  const autoBlur   = document.getElementById('auto-blur').checked;
   const autoThresh = document.getElementById('auto-thresh').checked;
-  const lowT      = autoThresh ? null : parseFloat(document.getElementById('low-thresh').value);
-  const highT     = autoThresh ? null : parseFloat(document.getElementById('high-thresh').value);
-  const autoIters = document.getElementById('auto-iters').checked;
-  const iters     = autoIters ? null : parseInt(document.getElementById('iterations').value);
-  const autoTol   = document.getElementById('auto-tol').checked;
-  const minR      = parseFloat(document.getElementById('min-radius').value);
-  const maxR      = parseFloat(document.getElementById('max-radius').value);
+  const lowT       = autoThresh ? null : parseFloat(document.getElementById('low-thresh').value);
+  const highT      = autoThresh ? null : parseFloat(document.getElementById('high-thresh').value);
+  const autoIters  = document.getElementById('auto-iters').checked;
+  const iters      = autoIters ? null : parseInt(document.getElementById('iterations').value);
+  const autoTol    = document.getElementById('auto-tol').checked;
+  const minR       = parseFloat(document.getElementById('min-radius').value) / ds;
+  const maxR       = parseFloat(document.getElementById('max-radius').value) / ds;
 
-  // Grayscale + noise estimate (needed for auto blur and/or auto tolerance)
+  // Grayscale + noise estimate on the (possibly downsampled) data
   let noiseStd = null;
   let sigma;
   if (autoBlur || autoTol) {
-    const gray = new Float32Array(w * h);
-    for (let i = 0; i < w * h; i++) {
+    const gray = new Float32Array(dw * dh);
+    for (let i = 0; i < dw * dh; i++) {
       const p = i * 4;
       gray[i] = 0.299 * imageData.data[p] + 0.587 * imageData.data[p+1] + 0.114 * imageData.data[p+2];
     }
-    // Compute noiseStd via Laplacian
     let lapSumSq = 0;
-    for (let y = 1; y < h - 1; y++) {
-      for (let x = 1; x < w - 1; x++) {
-        const i = y * w + x;
-        const lap = gray[i-w] + gray[i+w] + gray[i-1] + gray[i+1] - 4 * gray[i];
+    for (let y = 1; y < dh - 1; y++) {
+      for (let x = 1; x < dw - 1; x++) {
+        const i = y * dw + x;
+        const lap = gray[i-dw] + gray[i+dw] + gray[i-1] + gray[i+1] - 4 * gray[i];
         lapSumSq += lap * lap;
       }
     }
-    noiseStd = Math.sqrt(lapSumSq / ((w-2) * (h-2)));
+    noiseStd = Math.sqrt(lapSumSq / ((dw-2) * (dh-2)));
     if (autoBlur) {
       sigma = Math.min(4.0, Math.max(0.5, noiseStd / 20));
       document.getElementById('blur-val-display').textContent = sigma.toFixed(1);
@@ -838,7 +858,7 @@ function runPipeline() {
   }
   if (!autoBlur) sigma = parseFloat(document.getElementById('blur').value);
 
-  // Compute tolerance (auto or manual)
+  // Compute tolerance (auto or manual, in downsampled pixels)
   let tol;
   if (autoTol) {
     tol = noiseStd != null
@@ -851,77 +871,101 @@ function runPipeline() {
 
   const t0 = performance.now();
 
-  // Edge detection
+  // Edge detection on downsampled image
   const { edge: edges, lowT: usedLowT, highT: usedHighT } = canny(imageData, sigma, lowT, highT);
   const t1 = performance.now();
 
-  // Reflect auto-computed thresholds to display
   if (autoThresh) {
     document.getElementById('low-val-display').textContent  = Math.round(usedLowT);
     document.getElementById('high-val-display').textContent = Math.round(usedHighT);
   }
 
-  // Collect edge points (subsample if too many for speed)
-  edgePoints = [];
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      if (edges[y * w + x] === 255) edgePoints.push({ x, y });
+  // Collect edge points in downsampled coords
+  edgePointsDs = [];
+  for (let y = 0; y < dh; y++) {
+    for (let x = 0; x < dw; x++) {
+      if (edges[y * dw + x] === 255) edgePointsDs.push({ x, y });
     }
   }
+  // Also store scaled-up coords for result canvas
+  edgePoints = edgePointsDs.map(p => ({ x: p.x * ds, y: p.y * ds }));
 
   const MAX_PTS = 8000;
-  let ransacPts = edgePoints;
-  if (edgePoints.length > MAX_PTS) {
-    // Random subsample for RANSAC (keep all for inlier counting)
-    const step = Math.ceil(edgePoints.length / MAX_PTS);
-    ransacPts = edgePoints.filter((_, i) => i % step === 0);
+  let ransacPtsDs = edgePointsDs;
+  if (edgePointsDs.length > MAX_PTS) {
+    const step = Math.ceil(edgePointsDs.length / MAX_PTS);
+    ransacPtsDs = edgePointsDs.filter((_, i) => i % step === 0);
   }
 
   const t2 = performance.now();
-  bestCircle = ransac(ransacPts, iters, tol, minR, maxR);
+  const circleDs = ransac(ransacPtsDs, iters, tol, minR, maxR);
   const t3 = performance.now();
+
+  // Store downsampled circle for edge map
+  bestCircleDs = circleDs;
+
+  // Scale circle and inliers back to original coordinates for result canvas
+  if (circleDs) {
+    bestCircle = {
+      cx: circleDs.cx * ds,
+      cy: circleDs.cy * ds,
+      r:  circleDs.r  * ds,
+      itersUsed: circleDs.itersUsed,
+      inliers: circleDs.inliers.map(p => ({ x: p.x * ds, y: p.y * ds })),
+    };
+  } else {
+    bestCircle = null;
+  }
 
   if (autoIters && bestCircle) {
     document.getElementById('iters-val-display').textContent = bestCircle.itersUsed;
   }
 
-  drawEdgeMap(w, h);
+  currentDs = ds;
+  edgeCanvas.width  = dw;
+  edgeCanvas.height = dh;
+  drawEdgeMap(dw, dh);
   drawResult();
   updateStats();
   const t4 = performance.now();
 
   const ms = (a, b) => (b - a).toFixed(0) + 'ms';
+  const dsLabel = ds > 1 ? `  |  Downsample: ${ds}×` : '';
   if (bestCircle) {
-    status(`Edge detection: ${ms(t0,t1)}  |  RANSAC: ${ms(t2,t3)}  |  Render: ${ms(t3,t4)}  |  Total: ${ms(t0,t4)}`);
+    status(`Edge detection: ${ms(t0,t1)}  |  RANSAC: ${ms(t2,t3)}  |  Render: ${ms(t3,t4)}  |  Total: ${ms(t0,t4)}${dsLabel}`);
   } else {
-    status(`No circle found.  |  Edge detection: ${ms(t0,t1)}  |  RANSAC: ${ms(t2,t3)}  |  Total: ${ms(t0,t4)}`);
+    status(`No circle found.  |  Edge detection: ${ms(t0,t1)}  |  RANSAC: ${ms(t2,t3)}  |  Total: ${ms(t0,t4)}${dsLabel}`);
   }
 }
 
 function drawEdgeMap(w, h) {
   const edgeImgData = ectx.createImageData(w, h);
-  for (let i = 0; i < w * h; i++) edgeImgData.data[i*4+3] = 255;
+  // Light gray background
+  for (let i = 0; i < w * h; i++) {
+    edgeImgData.data[i*4] = edgeImgData.data[i*4+1] = edgeImgData.data[i*4+2] = 220;
+    edgeImgData.data[i*4+3] = 255;
+  }
 
-  if (bestCircle && bestCircle.inliers.length) {
-    const inlierSet = new Set(bestCircle.inliers.map(p => p.x + ',' + p.y));
-    for (const {x, y} of edgePoints) {
+  if (bestCircleDs && bestCircleDs.inliers.length) {
+    const inlierSet = new Set(bestCircleDs.inliers.map(p => p.x + ',' + p.y));
+    for (const {x, y} of edgePointsDs) {
       const i = y * w + x;
       if (inlierSet.has(x + ',' + y)) {
-        // Green
+        // Bright green
         edgeImgData.data[i*4]   = 0;
-        edgeImgData.data[i*4+1] = 210;
-        edgeImgData.data[i*4+2] = 80;
+        edgeImgData.data[i*4+1] = 220;
+        edgeImgData.data[i*4+2] = 50;
       } else {
-        // Blue
-        edgeImgData.data[i*4]   = 50;
-        edgeImgData.data[i*4+1] = 120;
-        edgeImgData.data[i*4+2] = 220;
+        // Bright blue
+        edgeImgData.data[i*4]   = 30;
+        edgeImgData.data[i*4+1] = 100;
+        edgeImgData.data[i*4+2] = 255;
       }
     }
   } else {
-    for (const {x, y} of edgePoints) {
+    for (const {x, y} of edgePointsDs) {
       const i = y * w + x;
-      edgeImgData.data[i*4] = edgeImgData.data[i*4+1] = edgeImgData.data[i*4+2] = 255;
+      edgeImgData.data[i*4] = edgeImgData.data[i*4+1] = edgeImgData.data[i*4+2] = 30;
     }
   }
   ectx.putImageData(edgeImgData, 0, 0);
